@@ -143,7 +143,7 @@
       ctx.strokeStyle = idx ? 'rgba(120,78,40,0.85)' : 'rgba(140,96,58,0.55)'; ctx.lineWidth = idx ? 1.4 : 0.7;
       ctx.beginPath(); c.lines.forEach(path); ctx.stroke();
     });
-    const stat = { lines: cs.reduce((s, c) => s + c.lines.length, 0), remaining: disp.remaining, inGuard: disp.inGuard, smoothedNodes: disp.smoothedNodes, nodes: res.n * res.n };
+    const stat = { lines: cs.reduce((s, c) => s + c.lines.length, 0), remaining: disp.remaining, inGuard: disp.inGuard, dropped: disp.dropped, smoothedNodes: disp.smoothedNodes, nodes: res.n * res.n };
     /* урез воды по наклонному уровню */
     ctx.strokeStyle = '#3a7fc0'; ctx.lineWidth = 1.2; ctx.beginPath(); BCA.topo.waterEdge(res, { smooth: iters, minR: opt.minR, interval }).forEach(path); ctx.stroke();
     /* подписи утолщённых горизонталей вдоль линий */

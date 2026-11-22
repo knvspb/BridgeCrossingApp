@@ -45,6 +45,16 @@
     const chord = q => zBl + (zBr - zBl) * (q - xL) / (xR - xL);
     const fill = q => (q > xL && q < xR) ? chord(q) : prof(q);                    // русло засыпано по хорде бровок
     const depth = u => Math.max(0, chord(xc + u * hw) - prof(xc + u * hw));        // глубина русла, u ∈ [−1; 1]
+    /* то же сечение, сглаженное окном шириной в шаг сетки: острый тальвег (уже шага сетки) иначе «мерцает»
+       от ряда к ряду и даёт ложные ямы; на оси дороги используется точное сечение */
+    const depthAA = (() => { const K = 400, tab = new Float64Array(K + 1), hU = (step * 1.5) / hw;
+      for (let k = 0; k <= K; k++) { const u = -1 + 2 * k / K; let s = 0, c = 0; for (let j = -8; j <= 8; j++) { const uu = U.clamp(u + hU * j / 8, -1, 1); s += depth(uu); c++; } tab[k] = s / c; }
+      // наибольшая глубина — как в узлах сетки на оси дороги (там точное сечение): иначе ось мельче соседних рядов → ложная яма
+      let m0 = 0, m1 = 0; for (let k = 0; k <= K; k++) m1 = Math.max(m1, tab[k]);
+      for (let ix = 0; ix < n; ix++) { const u = (ix * step - off - xc) / hw; if (Math.abs(u) < 1) m0 = Math.max(m0, depth(u)); }
+      if (!(m0 > 0)) for (let k = 0; k <= K; k++) m0 = Math.max(m0, depth(-1 + 2 * k / K));
+      const sc = m1 > 0 ? m0 / m1 : 1;
+      return u => { const f = (U.clamp(u, -1, 1) + 1) / 2 * K, k = Math.min(K - 1, Math.floor(f)); return sc * (tab[k] + (tab[k + 1] - tab[k]) * (f - k)); }; })();
 
     /* пойма = плавный тренд + микрорельеф профиля (старицы, гривы, западины) */
     const inLP = q => q > xBL && q < xL, inPP = q => q > xR && q < xBR;
@@ -56,24 +66,25 @@
     const resid = q => (inLP(q) || inPP(q)) ? fill(q) - trend(q) : 0;
     /* деформация координаты поймы σ ∈ [0; 1] (от подошвы берега к бровке): σисх = σ − a(y)·sin(πσ).
        |a| < 1/π — отображение монотонно, края поймы неподвижны; a(0) = 0. */
-    const aMax = natural ? 0.24 : 0.1;
+    const aMax = natural ? 0.24 : 0.16;
     const warpFn = () => { const A = rng.uniform(0.6, 1) * aMax, lam = L * rng.uniform(0.18, 0.3), ph = rng.uniform(0, 6.28), A2 = rng.uniform(0, 0.35) * A, lam2 = lam * rng.uniform(0.35, 0.55), ph2 = rng.uniform(0, 6.28);
       return y => U.clamp(A * (Math.sin(y / lam + ph) - Math.sin(ph)) + A2 * (Math.sin(y / lam2 + ph2) - Math.sin(ph2)), -0.3, 0.3); };
     const aL = warpFn(), aR = warpFn();
-    const depthMod = (() => { const ph = rng.uniform(0, 6.28), lam = L * rng.uniform(0.2, 0.35); return y => 1 + 0.2 * (Math.sin(y / lam + ph) - Math.sin(ph)) * (natural ? 1 : 0.4); })();
+    const depthMod = (() => { const ph = rng.uniform(0, 6.28), lam = L * rng.uniform(0.2, 0.35); return y => 1 + 0.075 * (Math.sin(y / lam + ph) - Math.sin(ph)) * (natural ? 1 : 0.4); })();   // ±15 %
+    let lastResid = 0;                                                       // микрорельеф в последней точке (для гашения добавок в понижениях)
     const floodplainZ = (q, y) => {
-      if (inLP(q)) { const s = (q - xBL) / (xL - xBL), s0 = s - aL(y) * Math.sin(Math.PI * s); return trend(q) + resid(xBL + s0 * (xL - xBL)) * depthMod(y); }
-      if (inPP(q)) { const s = (xBR - q) / (xBR - xR), s0 = s - aR(y) * Math.sin(Math.PI * s); return trend(q) + resid(xBR - s0 * (xBR - xR)) * depthMod(y); }
-      return fill(q);
+      if (inLP(q)) { const s = (q - xBL) / (xL - xBL), s0 = s - aL(y) * Math.sin(Math.PI * s); lastResid = resid(xBL + s0 * (xL - xBL)) * depthMod(y); return trend(q) + lastResid; }
+      if (inPP(q)) { const s = (xBR - q) / (xBR - xR), s0 = s - aR(y) * Math.sin(Math.PI * s); lastResid = resid(xBR - s0 * (xBR - xR)) * depthMod(y); return trend(q) + lastResid; }
+      lastResid = 0; return fill(q);
     };
     const nEdgeL = BCA.smoothNoise(rng, n + 1, Math.max(3, n / 10)), nEdgeR = BCA.smoothNoise(rng, n + 1, Math.max(3, n / 10));
     /* плавное поперечное смещение долины вне русла (большие радиусы вместо прямых): D(q, y) = A(q)·s(y)·g(q),
        s(0) = 0; A — своё для левой и правой стороны; g = 0 в русле (при R = 0 река остаётся прямой).
        |∂D/∂q| < 0,5 — смещение монотонно, формы рельефа не перехлёстываются. */
-    const dA = (natural ? 1 : 0.5) * Math.min(40, 0.06 * L), dL = rng.uniform(0.5, 1) * dA * (rng.next() < 0.5 ? -1 : 1), dR = rng.uniform(0.5, 1) * dA * (rng.next() < 0.5 ? -1 : 1);
+    const dA = (natural ? 1 : 0.8) * Math.min(40, 0.06 * L), dL = rng.uniform(0.5, 1) * dA * (rng.next() < 0.5 ? -1 : 1), dR = rng.uniform(0.5, 1) * dA * (rng.next() < 0.5 ? -1 : 1);
     const dLam = L * rng.uniform(0.09, 0.15), dPh = rng.uniform(0, 6.28), dLam2 = L * rng.uniform(0.05, 0.07), dPh2 = rng.uniform(0, 6.28);   // длины волн 0,6–0,9 L и 0,3–0,45 L
     const dS = y => (Math.sin(y / dLam + dPh) - Math.sin(dPh)) + 0.35 * (Math.sin(y / dLam2 + dPh2) - Math.sin(dPh2));
-    const drift = (q, y) => { const w = smooth((q - xc + 300) / 600), A = dL * (1 - w) + dR * w, gch = smooth((Math.abs(q - xc) - hw) / (1.5 * W)); return A * gch * dS(y); };
+    const drift = (q, y, cq) => { const w = smooth((q - cq + 300) / 600), A = dL * (1 - w) + dR * w, gch = smooth((Math.abs(q - cq) - hw) / (1.5 * W)); return A * gch * dS(y); };
     const eA = natural ? 35 : 12;                                               // извилистость бровки коренного берега, м
 
     /* плановое положение русла и долины */
@@ -93,7 +104,6 @@
     /* возмущения */
     const nHill = BCA.fourierNoise2D(rng, Math.max(3, n / 10));
     const nGriva = BCA.fourierNoise2D(rng, [Math.max(2, n / 45, 2.5 * Rmin / step), Math.max(6, n / 5)]);   // гривы не уже 2,5·Rmin
-    const nBed = BCA.fourierNoise2D(rng, Math.max(3, n / 14));
     const amp = t.amp ?? 0.3;
     // серповидные озёра-старицы — только вдали от оси дороги (не пересекают её)
     const lakes = [];
@@ -115,42 +125,54 @@
       for (let j = 0; j < k; j++) ravines.push({ side, y0: (rng.next() < 0.5 ? -1 : 1) * rng.uniform(0.2, 0.45) * L, d: rng.uniform(1.5, 3.5), w: Math.max(Rmin * 1.3, rng.uniform(14, 26)), wig: rng.uniform(25, 50), lam: rng.uniform(70, 130), ph: rng.uniform(0, 6.28), head: rng.uniform(120, 260) });
     }
 
+    /* ширина русла плавно меняется вдоль течения (±6 %): русло прямое при R = 0, но горизонтали в нём — не линейки */
+    /* тальвег слегка извивается внутри русла (побочни у берегов поочерёдно) — и в прямом русле */
+    const twL = W * rng.uniform(4, 5) / (2 * Math.PI), twP = rng.uniform(0, 6.28), tw = y => 0.25 * (Math.sin(y / twL + twP) - Math.sin(twP)) / 2;
+    const bwL = L * rng.uniform(0.065, 0.1), bwP = rng.uniform(0, 6.28), bw = y => 1 + 0.06 * (Math.sin(y / bwL + bwP) - Math.sin(bwP));
     const pts = [], axis = [], wl = [], wl0 = g.surveyLevel ?? v.hydro.unm;
     for (let iy = 0; iy < n; iy++) {
-      const y = -L / 2 + iy * step, f = fade(y), s_v = sv(y), rel = sc(y) - s_v, cos = Math.cos(Math.atan(dRel(y))), s = sArc(y);
+      const y = -L / 2 + iy * step, f = fade(y), s_v = sv(y), rel = sc(y) - s_v, cos = Math.cos(Math.atan(dRel(y))), s = sArc(y), hwy = hw * (1 + f * (bw(y) - 1));
       axis.push([U.r2(off + s_v + xc + rel), U.r2(y)]);
       wl.push(U.r2(wl0 - slope * s));
       for (let ix = 0; ix < n; ix++) {
         const X = ix * step, q0 = X - off - s_v;                               // абсцисса в координатах долины (профиля)
-        const q = q0 - f * drift(q0, y);                                       // с плавным смещением долины вне русла
-        const cq = xc + rel, u = (q - cq) * cos / hw;                          // положение поперёк русла
+        const cq = xc + rel;                                                   // текущая ось русла
+        const q = q0 - f * drift(q0, y, cq);                                   // плавное смещение долины вне русла
+        const u = (q - cq) * cos / hwy;                                        // положение поперёк русла
         const qe = q - f * eA * (nEdgeL[iy] * Math.exp(-Math.pow((q - xBL) / 70, 2)) + nEdgeR[iy] * Math.exp(-Math.pow((q - xBR) / 70, 2)));
-        const oldBed = qe > xL && qe < xR;                                     // прежнее положение русла (если оно сместилось)
-        const flood = inLP(qe) || inPP(qe) || oldBed;
-        // прежнее положение русла (при смещении русла на изгибе) засыпано: приподнято вместе с полосой у прежних бровок
-        const away = R !== 0 && Math.abs(q - cq) > hw ? f * (1 - smooth(Math.max(0, xL - qe, qe - xR) / 45)) * U.clamp((Math.abs(q - cq) - hw) / 30, 0, 1) : 0;
-        const base = (oldBed ? chord(qe) : flood ? floodplainZ(qe, y) : fill(qe)) + 0.9 * away;
+        /* поймы отсчитываются от ТЕКУЩИХ бровок русла: при смещении русла одна пойма сжимается, другая
+           расширяется, формы поймы (старицы) сдвигаются вместе с ней и не прерываются */
+        const bank = qe <= xBL || qe >= xBR;
+        let qs = qe;
+        if (!bank && Math.abs(u) >= 1) {
+          if (q < cq) { const sg = U.clamp((qe - xBL) / Math.max(1, (cq - hwy) - xBL), 0, 1); qs = xBL + sg * (xL - xBL); }
+          else { const sg = U.clamp((xBR - qe) / Math.max(1, xBR - (cq + hwy)), 0, 1); qs = xBR - sg * (xBR - xR); }
+        }
+        const flood = !bank && Math.abs(u) >= 1;
         let z;
         if (Math.abs(u) < 1) {
-          let d = depth(u);
-          if (R !== 0) { const outer = -Math.sign(R) * u; d *= 1 + f * 0.45 * outer * (1 - u * u) * 2; }   // плёс у вогнутого берега
-          z = Math.min(base, fill(q)) - d * (1 + f * 0.15 * nBed(ix, iy)) - slope * s;                     // дно — с уклоном по длине русла
-          z = Math.min(z, base - iv * y);                                                                   // не выше поймы рядом
+          /* дно: сечение из профиля; на изгибе тальвег смещается к вогнутому берегу (глубина не растёт),
+             вниз по течению — только уклон i по длине русла: без ям */
+          const dlt = U.clamp((R !== 0 ? -Math.sign(R) * 0.3 * f : 0) + f * tw(y), -0.45, 0.45), uu = U.clamp(u - dlt * (1 - u * u), -1, 1);
+          const zb = zBl + (zBr - zBl) * (u + 1) / 2;
+          z = zb - ((1 - f) * depth(uu) + f * depthAA(uu)) - slope * s;
         } else {
-          let dz = amp * nHill(ix, iy);
+          lastResid = 0; const base = flood ? floodplainZ(qs, y) : fill(qs);
+          const inHollow = 1 - smooth(-lastResid / 1.2);                     // 0 в понижениях профиля (старицах), 1 вне их
+          let dz = amp * nHill(ix, iy) * inHollow;
           if (natural && flood) {
-            const dist = Math.abs(q - cq) - hw;
-            dz += 0.6 * Math.exp(-dist / (0.8 * W));                           // прирусловой вал
-            dz += 0.45 * nGriva(ix, iy);                                       // гривы и межгривья
+            const dist = Math.abs(q - cq) - hwy;
+            dz += 0.6 * Math.exp(-dist / (0.8 * W)) * inHollow;               // прирусловой вал (не засыпает старицы)
+            dz += 0.45 * nGriva(ix, iy) * inHollow;                           // гривы и межгривья
             for (const o of lakes) {
-              const dx = qe - o.cx, dy = y - o.cy, rr = Math.hypot(dx, dy), ang = Math.atan2(dy, dx);
+              const dx = qs - o.cx, dy = y - o.cy, rr = Math.hypot(dx, dy), ang = Math.atan2(dy, dx);
               const da = ((ang - o.a0) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
               if (da > o.span) continue;
               const taper = Math.sin(Math.PI * da / o.span), e = Math.abs(rr - o.r) / o.w;
               if (e < 1) dz -= o.d * Math.pow(Math.cos(e * Math.PI / 2), 2) * Math.pow(taper, 0.4);
             }
           }
-          if (natural && !flood) {
+          if (natural && bank) {
             for (const r of ravines) {
               const inSide = r.side < 0 ? qe < xBL : qe > xBR; if (!inSide) continue;
               const far = r.side < 0 ? xBL - qe : qe - xBR;
@@ -307,6 +329,17 @@
     const key = [level, Rmin, interval].join('|'); res._disp = res._disp || {}; if (res._disp[key]) return res._disp[key];
     const n = res.n, z0 = Float64Array.from(res.points, p => p[2]), s0 = T.SMOOTH_SIGMA[level];
     const sig = [s0, Math.max(s0 * 1.7, 2.5), Math.max(s0 * 2.6, 4), Math.max(s0 * 4, 6)];          // ступени σ (в узлах сетки)
+    /* в русле — дополнительное сглаживание ВДОЛЬ ОСИ РУСЛА (окно σ ≈ 80 м, на том же смещении от оси):
+       дно почти горизонтально (уклон ~10⁻⁴), и колебания выборки узкого тальвега сеткой иначе рисуются ложными «ямами»;
+       сглаживание по оси y сетки на изгибе смешивало бы дно с берегом — поэтому именно вдоль кривой оси */
+    if (res.axis && res.chanHalf) {
+      const sy = Math.max(2, 80 / res.step), r = Math.ceil(2.5 * sy), w = []; for (let j = -r; j <= r; j++) w.push(Math.exp(-0.5 * (j / sy) ** 2));
+      const src = Float64Array.from(z0), zAtRow = (y, X) => { const fx = U.clamp(X / res.step, 0, n - 1), i = Math.min(n - 2, Math.floor(fx)), tt = fx - i; return src[y * n + i] * (1 - tt) + src[y * n + i + 1] * tt; };
+      for (let y = 0; y < n; y++) { const cx = res.axis[y][0];
+        for (let x = 0; x < n; x++) { const off = x * res.step - cx, d = Math.abs(off) / res.chanHalf, m = 1 - smooth((d - 0.85) / 0.3); if (!(m > 0)) continue;
+          let s = 0, ws = 0; for (let j = -r; j <= r; j++) { const yy = y + j; if (yy < 0 || yy >= n) continue; s += w[j + r] * zAtRow(yy, res.axis[yy][0] + off); ws += w[j + r]; }
+          z0[y * n + x] = src[y * n + x] * (1 - m) + (s / ws) * m; } }
+    }
     const lv = sig.map(s => blur(z0, n, s));
     const wmap = new Float64Array(n * n), F = T.FINE, nf = (n - 1) * F + 1, grid = fineGrid(res, nf), ds = res.step / 3;
     /* защищённые зоны: русло (полоса 1,3 полуширины вдоль оси русла) и полоса у оси дороги — только базовое сглаживание */
@@ -314,6 +347,9 @@
     for (let j = 0; j < n; j++) { const y = -res.L / 2 + j * res.step, cx = res.axis ? res.axis[j][0] : -1e9;
       for (let i = 0; i < n; i++) { const X = i * res.step, dch = Math.abs(X - cx) - hwG, dy = Math.abs(y) - yBand;
         guard[j * n + i] = Math.min(1, Math.max(0, Math.min(dch / 30, dy / 30))); } }      // 0 — защищено, 1 — свободно (переход 30 м)
+    /* водоёмы (старицы, озёра: дно ниже уреза > 0,2 м) тоже защищены — иначе усиленное сглаживание «замывает» узкую старицу и она рвётся */
+    if (res.wl) { const wet = new Float64Array(n * n); for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) wet[j * n + i] = z0[j * n + i] < res.wl[j] - 0.2 ? 1 : 0;
+      const wb = blur(wet, n, 1); for (let k = 0; k < n * n; k++) guard[k] = Math.min(guard[k], U.clamp(2 - wb[k] / 0.25, 0, 1)); }
     const free = (x, y) => { const i = Math.round(x / res.step), j = Math.round((y + res.L / 2) / res.step); return i >= 0 && j >= 0 && i < n && j < n && guard[j * n + i] > 0.5; };
     let zc, fine, levels, lines, tight = [];
     for (let pass = 0; pass < 7; pass++) {
@@ -321,7 +357,8 @@
       for (let k = 0; k < n * n; k++) { const w = U.clamp(wmap[k], 0, 3), a = Math.floor(w), b = Math.min(3, a + 1), t = w - a; zc[k] = lv[a][k] * (1 - t) + lv[b][k] * t; }
       fine = upsample(zc, n, F);
       levels = levelsOf(fine.z, interval);
-      lines = levels.map(L => ({ level: L, lines: isoOn(grid, fine.z, L) }));
+      /* генерализация: замкнутые горизонтали с периметром < 2πRmin (бугорки и западины < 2·Rmin) снимаются */
+      lines = levels.map(L => ({ level: L, lines: isoOn(grid, fine.z, L).filter(l => !(Rmin > 0 && l.closed && T.lineLength(l) < 2 * Math.PI * Rmin)) }));
       if (!(Rmin > 0) || pass === 6) break;
       tight = tightPoints(lines.flatMap(c => c.lines), Rmin, ds).filter(q => free(q[0], q[1]));
       if (!tight.length) break;
@@ -333,7 +370,8 @@
     }
     const allTight = Rmin > 0 ? tightPoints(lines.flatMap(c => c.lines), Rmin, ds) : [];
     const remaining = allTight.filter(q => free(q[0], q[1])).length, inGuard = allTight.length - remaining;
-    const out = { n, zc, fine, grid, contours: lines, interval, remaining, inGuard, smoothedNodes: wmap.reduce((s, w) => s + (w > 0.05 ? 1 : 0), 0) };
+    const dropped = Rmin > 0 ? levels.reduce((s, L) => s + isoOn(grid, fine.z, L).filter(l => l.closed && T.lineLength(l) < 2 * Math.PI * Rmin).length, 0) : 0;
+    const out = { n, zc, fine, grid, contours: lines, interval, remaining, inGuard, dropped, smoothedNodes: wmap.reduce((s, w) => s + (w > 0.05 ? 1 : 0), 0) };
     res._disp[key] = out; return out;
   };
   /* Горизонтали: [{ level, lines: [{ pts, closed }] }] — изолинии сглаженной поверхности (не пересекаются). */

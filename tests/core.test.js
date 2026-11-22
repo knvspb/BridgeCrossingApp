@@ -278,3 +278,49 @@ test('горизонтали: без длинных прямых, радиус �
     assert.ok(maxStraight < 350, `R=${R}: почти прямой участок ${maxStraight.toFixed(0)} м`);
   }
 });
+
+test('топоповерхность: правая старица тоже не прерывается (в т. ч. когда русло смещается к ней)', () => {
+  const v = B.schema.defaultVariant(1);
+  for (const R of [0, 2500, -1200]) {
+    const r = B.topo.generate(v, { radius: R }), n = r.n, xs = [];
+    for (let iy = 0; iy < n; iy++) {
+      const y = -r.L / 2 + iy * r.step, edge = r.axis[iy][0] + r.chanHalf * 1.07 + 15, zs = [];
+      for (let ix = 0; ix < n; ix++) { const p = r.points[iy * n + ix]; if (p[0] > edge && p[0] < 1080) zs.push(p[2]); }
+      zs.sort((a, b) => a - b); xs.push(zs[Math.floor(zs.length / 2)] - zs[0]);       // глубина понижения относительно медианы поймы в ряду
+    }
+    assert.ok(Math.min(...xs) > 1.0, `R=${R}: правая старица прерывается (глубина до ${Math.min(...xs).toFixed(2)} м)`);
+  }
+});
+
+test('топоповерхность: в русле нет серьёзных ям (> 0,3 м), тальвег вниз по течению не поднимается > 0,15 м', () => {
+  const v = B.schema.defaultVariant(1);
+  for (const R of [0, 2500, -1200]) {
+    // 1) замкнутые горизонтали в русле: глубина понижения внутри (уровень − min отметки внутри) ≤ 0,3 м
+    const r = B.topo.generate(v, { radius: R }), c = B.topo.contours(r, 0.25, { smooth: 1, minR: 25 }), n = r.n;
+    const axisX = Y => B.util.interp(r.axis.map(a => a[1]), r.axis.map(a => a[0]), Y);
+    c.forEach(q => q.lines.filter(l => l.closed && l.pts.every(p => Math.abs(p[0] - axisX(p[1])) < r.chanHalf * 0.9)).forEach(l => {
+      const xs = l.pts.map(p => p[0]), ys = l.pts.map(p => p[1]); let m = Infinity;
+      r.points.forEach(p => { if (p[0] >= Math.min(...xs) && p[0] <= Math.max(...xs) && p[1] >= Math.min(...ys) && p[1] <= Math.max(...ys)) m = Math.min(m, p[2]); });
+      assert.ok(q.level - m <= 0.3, `R=${R}: яма глубиной ${(q.level - m).toFixed(2)} м на отметке ${q.level}`);
+    }));
+    // 2) тальвег на мелкой сетке
+    const f = B.topo.generate(v, { radius: R, gridStep: 2.5 }), nf = f.n, th = [];
+    for (let iy = 0; iy < nf; iy++) { let mm = Infinity; const cx = f.axis[iy][0]; for (let ix = 0; ix < nf; ix++) { const p = f.points[iy * nf + ix]; if (Math.abs(p[0] - cx) < f.chanHalf) mm = Math.min(mm, p[2]); } th.push(mm); }
+    let rise = 0, run = Infinity; for (let k = 0; k < nf; k++) { rise = Math.max(rise, th[k] - run); run = Math.min(run, th[k]); }
+    assert.ok(rise <= 0.15, `R=${R}: тальвег поднимается на ${rise.toFixed(3)} м`);
+  }
+});
+
+test('топоплан: старицы на изображении не прерываются (дно ниже уреза на всей длине)', () => {
+  const v = B.schema.defaultVariant(1);
+  for (const R of [0, 2500, -1200]) {
+    const r = B.topo.generate(v, { radius: R }), n = r.n, d = B.topo.displaySurface(r, { smooth: 2, minR: 25, interval: 0.5 });
+    for (const side of [-1, 1]) {
+      let worst = -Infinity;
+      for (let iy = 0; iy < n; iy++) { const cx = r.axis[iy][0]; let m = Infinity;
+        for (let ix = 0; ix < n; ix++) { const X = ix * r.step; if (side * (X - cx) < r.chanHalf * 1.6) continue; m = Math.min(m, d.zc[iy * n + ix] - r.wl[iy]); }
+        worst = Math.max(worst, m); }
+      assert.ok(worst < -0.2, `R=${R}, ${side < 0 ? 'левая' : 'правая'} старица: в одном из рядов дно лишь на ${(-worst).toFixed(2)} м ниже уреза`);
+    }
+  }
+});
