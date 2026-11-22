@@ -195,7 +195,7 @@ test('топоповерхность: естественный рельеф до
   assert.ok(a.lakes + a.ravines > 0);
   let diff = 0; a.points.forEach((p, k) => { diff = Math.max(diff, Math.abs(p[2] - b.points[k][2])); });
   assert.ok(diff > 1);
-  const c = B.topo.contours(a, 0.5); assert.ok(c.length > 10 && c.every(q => q.lines.length > 0));
+  const c = B.topo.contours(a, 0.5); assert.ok(c.filter(q => q.lines.length > 0).length > 10);
 });
 
 test('топоповерхность: старицы из профиля не прерываются до и после моста', () => {

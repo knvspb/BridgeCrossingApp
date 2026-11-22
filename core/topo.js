@@ -82,9 +82,9 @@
     const K = (sArc(L / 2) - sArc(-L / 2)) / L, iv = slope * K;
 
     /* возмущения */
-    const nHill = BCA.smoothNoise2D(rng, n, n, Math.max(3, Math.round(n / 8)));
-    const nGriva = BCA.smoothNoise2D(rng, n, n, [Math.max(2, Math.round(n / 40)), Math.max(6, Math.round(n / 4))]);
-    const nBed = BCA.smoothNoise2D(rng, n, n, Math.max(3, Math.round(n / 12)));
+    const nHill = BCA.fourierNoise2D(rng, Math.max(3, n / 10));
+    const nGriva = BCA.fourierNoise2D(rng, [Math.max(2, n / 45), Math.max(6, n / 5)]);
+    const nBed = BCA.fourierNoise2D(rng, Math.max(3, n / 14));
     const amp = t.amp ?? 0.3;
     // серповидные озёра-старицы — только вдали от оси дороги (не пересекают её)
     const lakes = [];
@@ -222,12 +222,48 @@
       if (mi > 0 && md > tol * tol) { keep[mi] = 1; st.push([a, mi], [mi, b]); } }
     return { pts: p.filter((_, k) => keep[k]), closed: line.closed };
   };
+  /* Сглаживание полилинии: равномерная перенарезка с шагом ds, гауссов фильтр вдоль длины (σ, м),
+     затем 2 итерации Чайкина. Концы незамкнутых линий (на рамке плана) остаются на месте. */
+  T.smoothLine = (line, sigma, ds) => {
+    let p = line.pts; const closed = line.closed;
+    let len = 0; for (let k = 1; k < p.length; k++) len += Math.hypot(p[k][0] - p[k - 1][0], p[k][1] - p[k - 1][1]);
+    if (p.length < 3 || !(sigma > 0) || len < 4 * ds) return T.chaikin(line, sigma > 0 ? 2 : 0);
+    // перенарезка
+    const q = [p[0]]; let carry = 0;
+    for (let k = 1; k < p.length; k++) {
+      const a = p[k - 1], b = p[k], L = Math.hypot(b[0] - a[0], b[1] - a[1]); let s = ds - carry;
+      while (s <= L) { const t = s / L; q.push([a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])]); s += ds; }
+      carry = L - (s - ds);
+    }
+    if (!closed) q.push(p[p.length - 1]);
+    const m = closed ? q.length - (Math.hypot(q[q.length - 1][0] - q[0][0], q[q.length - 1][1] - q[0][1]) < ds * 0.5 ? 1 : 0) : q.length;
+    const r = Math.ceil(3 * sigma / ds), w = []; for (let j = -r; j <= r; j++) w.push(Math.exp(-0.5 * (j * ds / sigma) ** 2));
+    const out = [];
+    for (let k = 0; k < m; k++) {
+      if (!closed && (k === 0 || k === m - 1)) { out.push(q[k]); continue; }
+      let sx = 0, sy = 0, sw = 0;
+      for (let j = -r; j <= r; j++) {
+        let kk = k + j;
+        if (closed) kk = ((kk % m) + m) % m;
+        else { if (kk < 0 || kk >= m) continue; const lim = Math.min(k, m - 1 - k); if (Math.abs(j) > lim) continue; }   // у концов — симметричное окно
+        sx += w[j + r] * q[kk][0]; sy += w[j + r] * q[kk][1]; sw += w[j + r];
+      }
+      out.push([sx / sw, sy / sw]);
+    }
+    if (closed) out.push(out[0]);
+    return T.chaikin({ pts: out, closed }, 2);
+  };
+  T.lineLength = l => { let s = 0; for (let k = 1; k < l.pts.length; k++) s += Math.hypot(l.pts[k][0] - l.pts[k - 1][0], l.pts[k][1] - l.pts[k - 1][1]); return s; };
+  /* Сила сглаживания: 0 — нет, 1 — среднее, 2 — сильное, 3 — очень сильное (σ = 0 / 0,7 / 1,5 / 2,5 шага сетки). */
+  T.SMOOTH_SIGMA = [0, 0.7, 1.5, 2.5];
+  const smoothOf = (res, level) => { const k = U.clamp(Math.round(level ?? 2), 0, 3), sg = T.SMOOTH_SIGMA[k] * res.step;
+    return l => sg > 0 ? T.smoothLine(l, sg, res.step / 3) : l; };
   /* Горизонтали: [{ level, lines: [{ pts, closed }] }] — собранные и сглаженные. */
   T.contours = (res, interval, opt = {}) => {
-    const zs = res.points.map(p => p[2]), lo = Math.ceil(Math.min(...zs) / interval) * interval, hi = Math.max(...zs), iters = opt.smooth ?? 3, out = [];
+    const zs = res.points.map(p => p[2]), lo = Math.ceil(Math.min(...zs) / interval) * interval, hi = Math.max(...zs), sm = smoothOf(res, opt.smooth), out = [];
     for (let lev = lo; lev <= hi + 1e-9; lev += interval) {
       const L = +lev.toFixed(6), val = zs.map(z => (z === L ? z + 1e-7 : z) - L);
-      out.push({ level: L, lines: T.isolines(res, val).map(l => T.chaikin(l, iters)) });
+      out.push({ level: L, lines: T.isolines(res, val).filter(l => !l.closed || T.lineLength(l) > res.step).map(sm) });
     }
     return out;
   };
@@ -237,7 +273,7 @@
   /* Урез воды: изолиния поверхности относительно наклонного уровня воды wl(y). */
   T.waterEdge = (res, opt = {}) => {
     const n = res.n, val = res.points.map((p, k) => { const d = p[2] - res.wl[Math.floor(k / n)] + T.WET_TOL; return d === 0 ? 1e-7 : d; });
-    return T.isolines(res, val).map(l => T.chaikin(l, opt.smooth ?? 3));
+    return T.isolines(res, val).filter(l => !l.closed || T.lineLength(l) > res.step).map(smoothOf(res, opt.smooth));
   };
   /* Шаг горизонталей по перепаду высот: 0,25 / 0,5 / 1 / 2 / 5 м. */
   T.autoInterval = res => { const zs = res.points.map(p => p[2]), d = Math.max(...zs) - Math.min(...zs); return [0.25, 0.5, 1, 2, 5].find(s => d / s <= 40) || 5; };
@@ -278,7 +314,7 @@
     };
     const isIdx = l => Math.abs(l / index - Math.round(l / index)) < 1e-6;
     const tol = opt.tol ?? 0.05;
-    T.contours(res, interval, { smooth: opt.smooth ?? 3 }).forEach(c => c.lines.map(l => T.simplify(l, tol)).forEach(l => {
+    T.contours(res, interval, { smooth: opt.smooth }).forEach(c => c.lines.map(l => T.simplify(l, tol)).forEach(l => {
       poly3d(isIdx(c.level) ? 'HOR_UTOLSH' : 'HOR_OSN', l.pts, () => c.level, l.closed);
       if (isIdx(c.level) && l.pts.length > 6) {                                     // подпись в середине линии
         const k = Math.floor(l.pts.length / 2), a = l.pts[k - 1], b = l.pts[k + 1], ang = Math.atan2(-(b[1] - a[1]), b[0] - a[0]) * 180 / Math.PI;
@@ -286,7 +322,7 @@
         w(1, String(+c.level.toFixed(2)).replace('.', ',')); w(50, f(((ang + 90) % 180) - 90)); w(72, 1); w(11, f(l.pts[k][0])); w(21, f(-l.pts[k][1])); w(31, f(c.level));
       }
     }));
-    T.waterEdge(res).map(l => T.simplify(l, tol)).forEach(l => poly3d('UREZ', l.pts, p => T.wlAt(res, p[1]), l.closed));
+    T.waterEdge(res, { smooth: opt.smooth }).map(l => T.simplify(l, tol)).forEach(l => poly3d('UREZ', l.pts, p => T.wlAt(res, p[1]), l.closed));
     const road = []; for (let X = 0; X <= res.L + 1e-9; X += res.step / 2) road.push([X, 0]);
     poly3d('OS_DOROGI', road, p => T.zAt(res, p[0], 0), false);
     poly3d('OS_RUSLA', res.axis, p => T.wlAt(res, p[1]), false);

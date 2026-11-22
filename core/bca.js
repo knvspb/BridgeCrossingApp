@@ -89,5 +89,18 @@
     };
   };
 
+  /* Гладкий шум без решётки: сумма m косинусов со случайными направлениями и длинами волн около corr
+     (corr — число или [corrX, corrY] в узлах; при анизотропии формы вытянуты вдоль большей длины).
+     Нет осевых артефактов «квадратного» шума. Значения примерно в [−1; 1]. */
+  BCA.fourierNoise2D = function (rng, corr, m = 24) {
+    const cx = Array.isArray(corr) ? corr[0] : corr, cy = Array.isArray(corr) ? corr[1] : corr, waves = [];
+    for (let k = 0; k < m; k++) {
+      const th = rng.uniform(0, 2 * Math.PI), lam = rng.uniform(0.7, 1.6) * 2;          // длина волны ~ 2·corr
+      waves.push([Math.cos(th) / (lam * cx) * 2 * Math.PI, Math.sin(th) / (lam * cy) * 2 * Math.PI, rng.uniform(0, 2 * Math.PI), rng.uniform(0.5, 1)]);
+    }
+    const norm = Math.sqrt(waves.reduce((s, w) => s + w[3] * w[3], 0) / 2) * 1.6;
+    return (ix, iy) => { let s = 0; for (const w of waves) s += w[3] * Math.cos(w[0] * ix + w[1] * iy + w[2]); return Math.max(-1, Math.min(1, s / norm)); };
+  };
+
   BCA.newSeed = () => Math.floor(Math.random() * 1e6);
 })(typeof globalThis !== 'undefined' ? globalThis : this);

@@ -112,7 +112,7 @@
     const S = cv.width, M = 34, A = S - 2 * M, n = res.n, L = res.L, P = res.points, ctx = cv.getContext('2d');
     const px = X => M + X / L * A, py = Y => M + (Y + L / 2) / L * A;          // верх — выше по течению
     const zs = P.map(p => p[2]), hi = Math.max(...zs), wl0 = res.waterLevel;
-    const interval = opt.interval || BCA.topo.autoInterval(res), index = interval * 5, iters = opt.smooth ?? 3;
+    const interval = opt.interval || BCA.topo.autoInterval(res), index = interval * 5, iters = opt.smooth ?? 2;
     ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, S, S);
     /* заливка: билинейная интерполяция z; вода — ниже наклонного уровня wl(y) */
     const img = ctx.createImageData(A, A), D = img.data, zAt = (gx, gy) => P[gy * n + gx][2];
