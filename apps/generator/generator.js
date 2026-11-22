@@ -3,8 +3,10 @@
   'use strict';
   const B = window.BCA, U = B.util, C = B.charts, P = B.profile;
   const KEY = 'bca-generator-v1', TKEY = 'bca-templates-v1';
-  const TABS = [['task', 'Задание', 'ТЗ'], ['relief', 'Рельеф', 'Геодезия'], ['soil', 'Грунты', 'Геология'], ['hydro', 'Гидрология', 'Гидрология'], ['topo', 'Топография'], ['out', 'Выдача'], ['tpl', 'Шаблоны']];
-  let V = null, tab = 'task', mode = { kind: 'ground', layer: 0 }, ySel = 0, topoCache = null;
+  /* Вкладки идут в порядке пунктов плана генератора (п. 1–18); третий элемент — раздел проверки для значков. */
+  const TABS = [['geo', '1–3 Профиль', 'Геодезия'], ['soil', '4 Грунты', 'Геология'], ['survey', '5–8 Изыскания', 'Гидрология'], ['series', '9–12 Ряды', 'Гидрология'],
+    ['meteo', '13–14 Ветер, судоходство'], ['road', '15–16 Дорога', 'ТЗ'], ['topo', '17 Топография'], ['out', '18 Бланк'], ['tpl', 'Шаблоны']];
+  let V = null, tab = 'geo', mode = { kind: 'ground', layer: 0 }, ySel = 0, topoCache = null;
   const hist = [];
 
   /* ---------- DOM ---------- */
@@ -61,44 +63,19 @@
         name, errs ? h('span', { class: 'badge' }, errs) : warns ? h('span', { class: 'badge warn' }, warns) : null));
     });
   }
-  function renderTab() { ({ task: renderTask, relief: renderRelief, soil: renderSoil, hydro: renderHydro, topo: renderTopo, out: renderOut, tpl: renderTpl })[tab](); }
+  function renderTab() { ({ geo: renderGeo, soil: renderSoil, survey: renderSurvey, series: renderSeries, meteo: renderMeteo, road: renderRoad, topo: renderTopo, out: renderOut, tpl: renderTpl })[tab](); }
   const pane = id => { const b = document.getElementById('tab-' + id); b.innerHTML = ''; return b; };
-
-  /* ================= Задание ================= */
-  function renderTask() {
-    const box = pane('task'), m = V.meta, t = V.tz;
-    box.append(h('div', { class: 'grid-half' },
-      card('Задание', kv([['Шифр варианта', txt(() => m.code, x => m.code = x)], ['Студент', txt(() => m.student, x => m.student = x)], ['Группа', txt(() => m.group, x => m.group = x)],
-        ['Курс / семестр', h('span', { class: 'pair' }, num(() => m.course, x => m.course = x, { step: 1, w: 60 }), txt(() => m.semester, x => m.semester = x))],
-        ['Преподаватель', txt(() => m.teacher, x => m.teacher = x)],
-        ['Дата выдачи', h('input', { type: 'date', value: toISO(m.issueDate), onchange: e => change(() => m.issueDate = fromISO(e.target.value)) })]]),
-        more('Шапка бланка, цель, задачи, сроки',
-          kv([['Дисциплина', txt(() => m.discipline, x => m.discipline = x)], ['Код направления', txt(() => m.dirCode, x => m.dirCode = x)], ['Кафедра', txt(() => m.department, x => m.department = x)], ['Год в именах файлов', num(() => m.year, x => m.year = x, { step: 1 })]]),
-          sub('Цель'), txt(() => m.goal, x => m.goal = x, { area: true, rows: 2 }), sub('Задачи'), txt(() => m.tasks, x => m.tasks = x, { area: true, rows: 5 }),
-          sub('Контрольные сроки'), (m.deadlines || []).map((_, k) => h('div', { class: 'row' }, txt(() => m.deadlines[k], x => m.deadlines[k] = x, { ph: `Этап ${k + 1} — дата` }))))),
-      card('Техническое задание', kv([
-        ['Категория дороги', sel(B.ROAD_CATEGORIES.map(c => [c, c]), () => t.roadCategory, x => t.roadCategory = x)],
-        ['Полос движения', num(() => t.lanes, x => t.lanes = x, { step: 1 })],
-        ['Ответственность', sel(Object.entries(B.IMPORTANCE), () => t.importance, x => t.importance = Number(x))],
-        ['Район', txt(() => t.region, x => t.region = x, { ph: 'расположение, развитость района' })],
-        ['Вероятность превышения', num(() => t.prob, x => t.prob = x, { step: 0.0001 }), t.prob ? `доля (${U.fmt(t.prob * 100, 2)} %)` : 'доля'],
-        ['Класс судоходства', sel(B.NAV_CLASSES.map(c => [c, c]), () => t.navClass, x => t.navClass = x)],
-        ['Доп. информация', txt(() => t.addInfo, x => t.addInfo = x)]]),
-        h('p', { class: 'note' }, 'Отметки дороги — на вкладке «Рельеф» (задаются на берегах).'))));
-  }
-  const toISO = s => { const q = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(s || ''); return q ? `${q[3]}-${q[2]}-${q[1]}` : ''; };
-  const fromISO = s => { const q = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || ''); return q ? `${q[3]}.${q[2]}.${q[1]}` : ''; };
 
   /* ================= разрез с рисованием ================= */
   function profileCard(modes) {
-    const svg = svgEl('chart draw'), legend = h('div', { class: 'legend' });
+    const svg = svgEl(modes.length ? 'chart draw' : 'chart'), legend = h('div', { class: 'legend' });
     let view = null;
     const draw = () => {
       view = C.profile(svg, V, { mode });
       legend.innerHTML = '';
       V.geology.layers.forEach((l, k) => { const s = B.SOILS.find(q => q.code === l.code); legend.appendChild(h('span', {}, h('i', { style: `background:${C.LAYER_COLORS[k % C.LAYER_COLORS.length]}` }), `ИГУ ${l.no}: ${s ? s.name + (s.sub ? ', ' + s.sub.toLowerCase() : '') : '?'}`)); });
     };
-    const bar = h('div', { class: 'row' }, modes.map(([label, kind, layer]) => h('button', { class: mode.kind === kind && (kind === 'ground' || mode.layer === layer) ? 'on' : '', title: 'Зажмите кнопку мыши и ведите по разрезу', onclick: () => { mode = { kind, layer }; renderTab(); } }, label)));
+    const bar = !modes.length ? null : h('div', { class: 'row' }, modes.map(([label, kind, layer]) => h('button', { class: mode.kind === kind && (kind === 'ground' || mode.layer === layer) ? 'on' : '', title: 'Зажмите кнопку мыши и ведите по разрезу', onclick: () => { mode = { kind, layer }; renderTab(); } }, label)));
     let drag = null;
     const pos = ev => { const pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY; const p = pt.matrixTransform(svg.getScreenCTM().inverse()); return { x: view.ix(p.x), z: view.iy(p.y) }; };
     const nearest = xv => { let b = 0; view.x.forEach((q, i) => { if (Math.abs(q - xv) < Math.abs(view.x[b] - xv)) b = i; }); return b; };
@@ -107,7 +84,7 @@
       else if (mode.kind === 'top') { const l = V.geology.layers[mode.layer]; if (!l) return; const t = U.r2(Math.min(zv, V.geodesy.z[i])); l.tops[i] = t <= V.geology.ubv ? null : t; }
       else if (mode.kind === 'erase') { const l = V.geology.layers[mode.layer]; if (l) l.tops[i] = null; }
     };
-    svg.addEventListener('pointerdown', ev => { if (!view) return; snapshot(); svg.setPointerCapture(ev.pointerId); const p = pos(ev), i = nearest(p.x); applyAt(i, p.z); drag = { i, z: p.z }; draw(); });
+    svg.addEventListener('pointerdown', ev => { if (!view || !modes.length) return; snapshot(); svg.setPointerCapture(ev.pointerId); const p = pos(ev), i = nearest(p.x); applyAt(i, p.z); drag = { i, z: p.z }; draw(); });
     svg.addEventListener('pointermove', ev => { if (!drag) return; const p = pos(ev), i = nearest(p.x), a = drag.i, n = Math.abs(i - a);
       for (let s = 0; s <= n; s++) applyAt(a + Math.sign(i - a) * s, drag.z + (p.z - drag.z) * (n ? s / n : 1));
       drag = { i, z: p.z }; draw(); });
@@ -117,144 +94,180 @@
     return card(null, bar, svg, legend);
   }
 
-  /* ================= Рельеф ================= */
-  function renderRelief() {
-    const box = pane('relief'), g = V.geodesy, p = V.gen.profile, w = P.widths(g), I = P.idx(g), N = I.N;
+  /* ================= Шаги по плану генератора (п. 1–18) ================= */
+  const step = (n, title, ...kids) => card(`${n}. ${title}`, ...kids);
+  const pairNum = (getA, setA, getB, setB, oA = {}, oB = {}) => h('span', { class: 'pair' }, num(getA, setA, Object.assign({ w: 80 }, oA)), num(getB, setB, Object.assign({ w: 80 }, oB)));
+
+  /* ---------- 1–3. Профиль ---------- */
+  function renderGeo() {
+    const box = pane('geo'), g = V.geodesy, p = V.gen.profile, w = P.widths(g), I = P.idx(g), N = I.N;
     mode = { kind: 'ground', layer: 0 };
-    const zoneRows = P.ZONES.map(k => h('tr', { class: 'z-' + k },
-      h('td', {}, P.ZONE_NAME[k]),
-      h('td', {}, num(() => w[k], x => P.setZone(V, k, x, null), { step: 10, w: 80, title: 'Ширина, м — число интервалов пересчитывается' })),
-      h('td', {}, num(() => g.zones[k].step, x => P.setZone(V, k, w[k], x), { step: 1, w: 64, title: k === 'R' ? 'Шаг промеров глубин, м' : 'Шаг нивелировки, м' })),
-      h('td', { class: 'num' }, g.zones[k].n)));
-    const zones = card('Профиль', tbl(['Зона', 'Ширина, м', 'Шаг, м', 'Интерв.'], zoneRows),
-      h('div', { class: 'ctrl' }, 'Створов', h('b', {}, w.n), 'Длина', h('b', {}, w.total + ' м')),
-      kv([['УНМ', num(() => V.hydro.unm, x => V.hydro.unm = x == null ? null : U.r1(x), { step: 0.1 }), 'м'],
-        ['Уровень на дату изысканий', num(() => g.surveyLevel, x => g.surveyLevel = x), 'м', 'Ноль измерения глубин: студент получает глубины русла от этого уровня'],
-        ['Точность отметок', sel([[1, '0,1 м'], [2, '0,01 м']], () => p.precision ?? 2, x => { p.precision = Number(x); g.z = g.z.map(q => U.round(q, p.precision)); })]]));
-    const roadRows = V.tz.road.map((q, k) => h('tr', {}, h('td', {}, num(() => q.st, x => q.st = U.clamp(Math.round(x ?? 1), 1, N), { step: 1, w: 64 })),
-      h('td', { class: 'num' }, U.fmt(g.z[q.st - 1])), h('td', {}, num(() => q.z, x => q.z = x, { w: 84 })), h('td', {}, btn('✕', () => change(() => V.tz.road.splice(k, 1))))));
-    const road = card('Ось дороги на берегах', tbl(['Створ', 'Земля, м', 'ПЧ, м', ''], roadRows),
-      h('div', { class: 'row' }, btn('+ точка', () => change(() => V.tz.road.push({ st: 1, z: V.tz.road[0]?.z ?? null, label: '' }))), btn('по умолчанию', () => change(() => V.tz.road = B.schema.autoRoad(V)), null, 'Края и подошвы берегов')),
-      h('p', { class: 'note' }, `Берега: створы 1–${I.bl + 1} и ${I.br + 1}–${N}. На поймах и в русле ось определяет студент.`));
-    const G = (l, key, step, u) => [l, num(() => p[key], x => p[key] = x, { step: step ?? 0.1 }), u];
-    const pair = (a, b) => h('span', { class: 'pair' }, num(() => p[a], x => p[a] = x, { step: 0.1, w: 70 }), num(() => p[b], x => p[b] = x, { step: 0.05, w: 70 }));
-    const gen = card(null, more('Генератор профиля',
-      kv([['Зерно', h('span', { class: 'pair' }, num(() => p.seed, x => p.seed = x | 0, { step: 1, w: 90 }), btn('🎲', () => change(() => { p.seed = B.newSeed(); P.generate(V); })))],
-        G('Левый берег: край', 'zOutL', 0.1, 'м'), G('Левый берег: подошва', 'zFootL', 0.1, 'м'), G('Левая бровка', 'zBrowL', 0.1, 'м'),
-        G('Форма левой поймы', 'shapeL'), G('Неровность левой поймы', 'noiseL', 0.1, 'м'), ['Старица слева: глубина, место', pair('oxL', 'oxPosL')],
-        G('Тальвег', 'zThal', 0.1, 'м'), G('Место тальвега 0…1', 'thalPos', 0.05), G('Полнота русла', 'shapeC'), G('Неровность дна', 'noiseC', 0.1, 'м'),
-        G('Правая бровка', 'zBrowR', 0.1, 'м'), G('Форма правой поймы', 'shapeR'), G('Неровность правой поймы', 'noiseR', 0.1, 'м'), ['Старица справа: глубина, место', pair('oxR', 'oxPosR')],
-        G('Правый берег: подошва', 'zFootR', 0.1, 'м'), G('Правый берег: край', 'zOutR', 0.1, 'м')]),
-      h('div', { class: 'row' }, btn('Сгенерировать профиль', () => change(() => P.generate(V)), 'primary'))));
-    const x = P.stationX(g), dep = {}; P.depths(V).forEach(d => dep[d.i] = d.h);
+    // п. 1: три шага (берега, поймы, промеры) и ширины пяти зон
+    const setStep = (keys, s) => { if (!(s > 0)) return; const n = {}; keys.forEach(k => { const wk = g.zones[k].step * g.zones[k].n; g.zones[k].step = s; n[k] = Math.max(1, Math.round(wk / s)); }); P.reshape(V, n); };
+    const stepIn = (keys, title) => num(() => g.zones[keys[0]].step, x => setStep(keys, x), { step: 1, w: 70, title });
+    const wRow = k => h('tr', { class: 'z-' + k }, h('td', {}, P.ZONE_NAME[k]), h('td', {}, num(() => w[k], x => P.setZone(V, k, x, null), { step: 10, w: 80 })), h('td', { class: 'num' }, g.zones[k].n));
+    const s1 = step(1, 'Шаги и створы',
+      kv([['Шаг нивелировки на берегах', stepIn(['BL', 'BR']), 'м'], ['Шаг нивелировки на поймах', stepIn(['LP', 'PP']), 'м'], ['Шаг промеров глубин', stepIn(['R']), 'м']]),
+      tbl(['Участок', 'Ширина, м', 'Интервалов'], P.ZONES.map(wRow)),
+      h('div', { class: 'ctrl' }, 'Створов', h('b', {}, w.n), 'Общая длина', h('b', {}, w.total + ' м'), 'Поймы', h('b', {}, `${w.LP} + ${w.PP} м`), 'Русло', h('b', {}, w.R + ' м')),
+      h('p', { class: 'note' }, 'Берега — незатопляемые участки; на них задаются отметки дороги (п. 16).'));
+    const s2 = step(2, 'Уровень нижней межени', kv([['УНМ', num(() => V.hydro.unm, x => V.hydro.unm = x == null ? null : U.r1(x), { step: 0.1 }), 'м']]));
+    const G = (l, key, st, u) => [l, num(() => p[key], x => p[key] = x, { step: st ?? 0.1 }), u];
+    const pr2 = (a, b) => h('span', { class: 'pair' }, num(() => p[a], x => p[a] = x, { step: 0.1, w: 70 }), num(() => p[b], x => p[b] = x, { step: 0.1, w: 70 }));
+    const pr = (a, b) => h('span', { class: 'pair' }, num(() => p[a], x => p[a] = x, { step: 0.1, w: 70 }), num(() => p[b], x => p[b] = x, { step: 0.05, w: 70 }));
+    const x = P.stationX(g);
     const rows = []; for (let i = 0; i < N; i++) rows.push(h('tr', { class: 'z-' + P.zoneKey(g, i, I) }, h('td', {}, i + 1), h('td', {}, P.zoneOf(g, i, I)), h('td', { class: 'num' }, Math.round(x[i])),
-      h('td', {}, num(() => g.z[i], z => { if (z != null) { g.z[i] = z; P.clampTops(V); } }, { w: 84 })), h('td', { class: 'num' }, i >= I.iL && i <= I.iR ? U.fmt(dep[i]) : ''),
+      h('td', {}, num(() => g.z[i], z => { if (z != null) { g.z[i] = z; P.clampTops(V); } }, { w: 84 })),
       h('td', {}, txt(() => g.comments?.[i] ?? '', s => { g.comments = g.comments || {}; if (s) g.comments[i] = s; else delete g.comments[i]; }, { ph: P.comment({ zones: g.zones }, i, I) }))));
-    const table = card(null, more('Отметки по створам', h('div', { class: 'scroll' }, tbl(['Створ', 'Зона', 'x, м', 'Отметка', 'Глубина', 'Комментарий'], rows))));
-    box.append(h('div', { class: 'grid2' }, h('div', {}, zones, road, gen), h('div', {}, profileCard([['Рисовать поверхность', 'ground', 0]]), table)));
+    const s3 = step(3, 'Профиль дна реки', Array.from(profileCard([['Рисовать', 'ground', 0]]).childNodes),
+      kv([['Точность по вертикали', sel([[1, '0,1 м'], [2, '0,01 м']], () => p.precision ?? 1, q => { p.precision = Number(q); g.z = g.z.map(z => U.round(z, p.precision)); })]]),
+      more('Генератор профиля',
+        kv([['Зерно', h('span', { class: 'pair' }, num(() => p.seed, q => p.seed = q | 0, { step: 1, w: 90 }), btn('🎲', () => change(() => { p.seed = B.newSeed(); P.generate(V); })))],
+          ['Левый берег: край, подошва', pr2('zOutL', 'zFootL'), 'м'], G('Левая бровка', 'zBrowL', 0.1, 'м'),
+          ['Левая пойма: форма, неровность', pr2('shapeL', 'noiseL'), ''], ['Старица слева: глубина, место', pr('oxL', 'oxPosL')],
+          G('Тальвег', 'zThal', 0.1, 'м'), G('Место тальвега 0…1', 'thalPos', 0.05), ['Русло: полнота, неровность', pr2('shapeC', 'noiseC'), ''],
+          G('Правая бровка', 'zBrowR', 0.1, 'м'), ['Правая пойма: форма, неровность', pr2('shapeR', 'noiseR'), ''], ['Старица справа: глубина, место', pr('oxR', 'oxPosR')],
+          ['Правый берег: подошва, край', pr2('zFootR', 'zOutR'), 'м']]),
+        h('div', { class: 'row' }, btn('Сгенерировать профиль', () => change(() => P.generate(V)), 'primary'))),
+      more('Отметки по створам', h('div', { class: 'scroll' }, tbl(['Створ', 'Зона', 'x, м', 'Отметка', 'Комментарий'], rows))));
+    box.append(h('div', { class: 'grid2' }, h('div', {}, s1, s2), s3));
   }
 
-  /* ================= Грунты ================= */
+  /* ---------- 4. Грунты ---------- */
   function renderSoil() {
     const box = pane('soil'), geo = V.geology, L = geo.layers, N = V.geodesy.z.length;
     if (!(mode.kind !== 'ground' && L[mode.layer])) mode = L.length ? { kind: 'top', layer: 0 } : { kind: 'ground', layer: 0 };
     const soilSel = l => { const s = h('select', { style: 'width:100%;min-width:220px' }); B.SOILS.forEach(o => s.appendChild(h('option', { value: o.code, selected: o.code === l.code }, `${o.code}. ${o.name}${o.sub ? ' — ' + o.sub : ''}${o.ch1 ? ' (' + o.ch1 + ')' : ''}`))); s.onchange = () => change(() => l.code = Number(s.value)); return s; };
     const vTitle = l => { const s = B.SOILS.find(q => q.code === l.code); return s ? 'vнр при h = 0,4/1/2/3/5/10 м: ' + s.v.join(' / ') + ' м/с' : ''; };
     const rows = L.map((l, k) => h('tr', {},
-      h('td', { class: 'nowrap' }, h('span', { class: 'sw', style: `background:${C.LAYER_COLORS[k % C.LAYER_COLORS.length]}` }), ' ', txt(() => l.no, x => l.no = x)),
+      h('td', { class: 'nowrap' }, h('span', { class: 'sw', style: `background:${C.LAYER_COLORS[k % C.LAYER_COLORS.length]}` }), ' ', txt(() => l.no, q => l.no = q)),
       h('td', { title: vTitle(l) }, soilSel(l)),
-      h('td', {}, num(() => l.gen.order ?? k + 1, x => l.gen.order = x ?? k + 1, { step: 1, w: 48, title: 'Порядок залегания: 1 — верхний' })),
-      h('td', {}, num(() => l.gen.t, x => l.gen.t = x ?? 0, { step: 0.5, w: 58, title: 'Мощность, м' })),
-      h('td', {}, num(() => l.gen.var, x => l.gen.var = U.clamp(x ?? 0, 0, 1.5), { step: 0.1, w: 52, title: 'Изменчивость мощности 0…1' })),
-      h('td', { class: 'nowrap' }, chk(() => l.gen.lens, x => l.gen.lens = x, '', 'Линза между створами'), num(() => l.gen.from, x => l.gen.from = U.clamp(x ?? 1, 1, N), { step: 1, w: 52 }), '–', num(() => Math.min(l.gen.to, N), x => l.gen.to = U.clamp(x ?? N, 1, N), { step: 1, w: 52 })),
+      h('td', {}, num(() => l.gen.order ?? k + 1, q => l.gen.order = q ?? k + 1, { step: 1, w: 48, title: 'Порядок залегания: 1 — верхний' })),
+      h('td', {}, num(() => l.gen.t, q => l.gen.t = q ?? 0, { step: 0.5, w: 58, title: 'Мощность, м' })),
+      h('td', {}, num(() => l.gen.var, q => l.gen.var = U.clamp(q ?? 0, 0, 1.5), { step: 0.1, w: 52, title: 'Изменчивость мощности 0…1' })),
+      h('td', { class: 'nowrap' }, chk(() => l.gen.lens, q => l.gen.lens = q, '', 'Линза между створами'), num(() => l.gen.from, q => l.gen.from = U.clamp(q ?? 1, 1, N), { step: 1, w: 52 }), '–', num(() => Math.min(l.gen.to, N), q => l.gen.to = U.clamp(q ?? N, 1, N), { step: 1, w: 52 })),
       h('td', { class: 'nowrap' }, btn('↑', () => change(() => { [L[k - 1], L[k]] = [L[k], L[k - 1]]; })), btn('↓', () => change(() => { [L[k + 1], L[k]] = [L[k], L[k + 1]]; })), btn('✕', () => change(() => L.splice(k, 1))))));
     rows.forEach((r, k) => { const b = r.lastChild.querySelectorAll('button'); b[0].disabled = k === 0; b[1].disabled = k === L.length - 1; });
-    const layers = card('ИГУ', h('div', { style: 'overflow:auto' }, tbl(['№', 'Грунт', 'Залег.', 'Мощн.', 'Изм.', 'Линза', ''], rows)),
-      h('div', { class: 'row' }, btn('+ ИГУ', () => change(() => L.push({ no: String(L.length + 1), code: 20, tops: new Array(N).fill(null), gen: { t: 3, var: 0.3, lens: false, from: 1, to: N, order: Math.max(0, ...L.map(l => l.gen.order || 0)) + 1 } }))),
-        btn('Сгенерировать разрез', () => change(() => P.generateSoil(V)), 'primary')),
-      kv([['Условный низ', num(() => geo.ubv, x => geo.ubv = x, { step: 0.5 }), 'м'], ['Плавность слоёв', num(() => geo.corr, x => geo.corr = U.clamp(x ?? 10, 2, 40), { step: 1, title: 'Створов на «волну» кровли' })],
-        ['Зерно', h('span', { class: 'pair' }, num(() => geo.seed, x => geo.seed = x | 0, { step: 1, w: 90 }), btn('🎲', () => change(() => { geo.seed = B.newSeed(); P.generateSoil(V); })))]]));
     const modes = L.map((l, k) => ['Кровля ' + l.no, 'top', k]);
     if (L.length) modes.push(['Ластик ' + L[mode.layer].no, 'erase', mode.layer]);
     const tr = []; for (let i = 0; i < N; i++) tr.push(h('tr', { class: 'z-' + P.zoneKey(V.geodesy, i) }, h('td', {}, i + 1), h('td', { class: 'num' }, U.fmt(V.geodesy.z[i])),
-      L.map(l => h('td', {}, num(() => l.tops[i], x => { l.tops[i] = x == null || x === 0 ? null : U.r2(Math.min(x, V.geodesy.z[i])); }, { w: 76 })))));
-    const tops = card(null, more('Отметки кровли по створам', h('div', { class: 'scroll' }, tbl(['Створ', 'Земля'].concat(L.map(l => 'ИГУ ' + l.no)), tr))));
-    box.append(h('div', { class: 'grid2' }, h('div', {}, layers), h('div', {}, profileCard(modes), tops)));
+      L.map(l => h('td', {}, num(() => l.tops[i], q => { l.tops[i] = q == null || q === 0 ? null : U.r2(Math.min(q, V.geodesy.z[i])); }, { w: 76 })))));
+    box.append(h('div', { class: 'grid2' },
+      step(4, 'Грунты: библиотека и границы слоёв', h('div', { style: 'overflow:auto' }, tbl(['№', 'Грунт', 'Залег.', 'Мощн.', 'Изм.', 'Линза', ''], rows)),
+        h('div', { class: 'row' }, btn('+ ИГУ', () => change(() => L.push({ no: String(L.length + 1), code: 20, tops: new Array(N).fill(null), gen: { t: 3, var: 0.3, lens: false, from: 1, to: N, order: Math.max(0, ...L.map(l => l.gen.order || 0)) + 1 } }))),
+          btn('Сгенерировать границы', () => change(() => P.generateSoil(V)), 'primary')),
+        kv([['Условный низ', num(() => geo.ubv, q => geo.ubv = q, { step: 0.5 }), 'м'], ['Плавность слоёв', num(() => geo.corr, q => geo.corr = U.clamp(q ?? 10, 2, 40), { step: 1, title: 'Створов на «волну» кровли' })],
+          ['Зерно', h('span', { class: 'pair' }, num(() => geo.seed, q => geo.seed = q | 0, { step: 1, w: 90 }), btn('🎲', () => change(() => { geo.seed = B.newSeed(); P.generateSoil(V); })))]])),
+      h('div', {}, profileCard(modes), card(null, more('Отметки кровли по створам', h('div', { class: 'scroll' }, tbl(['Створ', 'Земля'].concat(L.map(l => 'ИГУ ' + l.no)), tr)))))));
   }
 
-  /* ================= Гидрология ================= */
-  function renderHydro() {
-    const box = pane('hydro'), hy = V.hydro, r = hy.regime, post = hy.post, lib = V.library.roughness, Hy = B.hydrology, auto = Hy.autoLevels(V), sv = Hy.studentView(V);
-    const z0 = Hy.postZero(V), Pof = z => z == null ? '' : `П = ${U.fmt(Hy.toPost(V, z) - z0)}`;
+  /* ---------- 5–8. Гидрометрические изыскания ---------- */
+  function renderSurvey() {
+    const box = pane('survey'), hy = V.hydro, g = V.geodesy, r = hy.regime, post = hy.post, lib = V.library.roughness, Hy = B.hydrology, auto = Hy.autoLevels(V), sv = Hy.studentView(V), I = P.idx(g);
+    const z0 = Hy.postZero(V), Pof = z => z == null ? '' : `→ П = ${U.fmt(Hy.toPost(V, z) - z0)} м`;
     const morphRow = k => {
       const zone = k === 'R' ? 'channel' : 'floodplain', cur = hy.morph[k], q = lib.find(o => o.id === cur.id);
       const s = h('select', { title: cur.text, style: 'max-width:300px' }); lib.filter(o => o.zone === zone).forEach(o => s.appendChild(h('option', { value: o.id, selected: o.id === cur.id }, o.text)));
       s.onchange = () => change(() => { const o = lib.find(z => z.id === s.value); hy.morph[k] = { id: o.id, m: o.m, text: o.text }; });
       return [P.ZONE_NAME[k], h('span', { class: 'pair' }, s, num(() => cur.m, x => cur.m = x, { step: 1, w: 56, title: 'm = 1/n' }), q && !q.verified ? h('span', { class: 'pill unv', title: 'm не сверен с таблицей методических указаний' }, '?') : null)];
     };
-    const rsuIn = h('input', { type: 'text', value: hy.rsuT.join(', '), style: 'width:130px', title: 't, сут через запятую' });
-    rsuIn.onchange = () => change(() => { const t = rsuIn.value.split(/[;,\s]+/).map(Number).filter(q => Number.isFinite(q) && q >= 0).map(Math.round); if (t.length) hy.rsuT = [...new Set(t)].sort((a, b) => a - b); });
-    const synthetic = !!(hy.series.length && hy.series[0].daily), stale = synthetic && hy.seriesStamp !== Hy.stamp(V);
-    const left = card(null,
-      sub('Водомерный пост'),
-      kv([['Нуль поста', num(() => post.zero, x => post.zero = x, { auto: () => post.zero == null, ph: 'УНМ−2: ' + U.fmt(z0) }), 'м'],
-        ['Удаление от оси', num(() => post.offsetKm, x => post.offsetKm = x ?? 0, { step: 0.1, title: '> 0 — ниже по течению; студент переносит уровни по уклону' }), 'км'],
-        ['Наблюдения: с года, лет', h('span', { class: 'pair' }, num(() => post.firstYear, x => post.firstYear = x | 0, { step: 1, w: 80 }), num(() => post.nYears, x => post.nYears = U.clamp(x | 0, 3, 100), { step: 1, w: 60 }))],
-        ['min УВВ за историю', num(() => r.zLo, x => r.zLo = x, { auto: () => r.zLo == null, ph: 'авто ' + U.fmt(auto.zLo) }), Pof(r.zLo ?? auto.zLo)],
-        ['max УВВ за историю', num(() => r.zHi, x => r.zHi = x, { auto: () => r.zHi == null, ph: 'авто ' + U.fmt(auto.zHi) }), Pof(r.zHi ?? auto.zHi)]]),
-      sub('ВИУ'),
-      kv([['Отметка, год', h('span', { class: 'pair' }, num(() => hy.viu.z, x => { hy.viu.z = x; hy.viu.auto = x == null; }, { w: 90 }), num(() => hy.viu.year, x => hy.viu.year = x | 0, { step: 1, w: 70 }))],
-        ['Объект привязки', txt(() => hy.viu.refName, x => hy.viu.refName = x)], ['Отметка объекта', num(() => hy.viu.refZ, x => hy.viu.refZ = x), sv.viuExcess != null ? `ВИУ выше на ${U.fmt(sv.viuExcess)}` : '']]),
-      sub('Уклон и шероховатость'),
-      kv([['Уклон i', h('span', { class: 'pair' }, num(() => hy.slope.i, x => hy.slope.i = x, { step: 0.00001, w: 100 }),
-          sel([['value', 'числом'], ['twoLevels', 'задачей']], () => hy.slope.studentMode, x => hy.slope.studentMode = x, { title: 'Задачей: студент получает два уреза на известном расстоянии' }))],
-        sv.slopeTask ? ['Урезы на ' + sv.slopeTask.Lkm + ' км', h('span', {}, `${U.fmt(sv.slopeTask.zUp)} / ${U.fmt(sv.slopeTask.zDown)}`), `i = ${sv.slopeCheck}`] : null,
-        morphRow('LP'), morphRow('R'), morphRow('PP')]),
+    const s5 = step(5, 'Морфометрия и уклон', kv([morphRow('LP'), morphRow('R'), morphRow('PP'),
+      ['Уклон i', h('span', { class: 'pair' }, num(() => hy.slope.i, x => hy.slope.i = x, { step: 0.00001, w: 100 }),
+        sel([['value', 'студенту числом'], ['twoLevels', 'студенту задачей']], () => hy.slope.studentMode, x => hy.slope.studentMode = x, { title: 'Задачей: два уреза на известном расстоянии' }))],
+      sv.slopeTask ? ['Урезы через ' + sv.slopeTask.Lkm + ' км', h('span', {}, `${U.fmt(sv.slopeTask.zUp)} / ${U.fmt(sv.slopeTask.zDown)}`), `i = ${sv.slopeCheck}`] : null]),
       more('Справочник ландшафтов', tbl(['Участок', 'm', 'Характеристика', '✓', ''], lib.map((q, k) => h('tr', {},
         h('td', {}, sel([['floodplain', 'пойма'], ['channel', 'русло']], () => q.zone, x => q.zone = x)), h('td', {}, num(() => q.m, x => q.m = x, { step: 1, w: 52 })),
         h('td', {}, txt(() => q.text, x => q.text = x)), h('td', {}, chk(() => q.verified, x => q.verified = x, '', 'Сверено с методическими указаниями')), h('td', {}, btn('✕', () => change(() => lib.splice(k, 1))))))),
-        btn('+ строка', () => change(() => lib.push({ id: 'u' + Date.now(), zone: 'floodplain', m: null, verified: false, src: '', text: '' })))),
-      sub('Тип реки и ряды'),
-      kv([['Питание', sel(Object.entries(B.RIVER_FEED).map(([k, q]) => [k, q.name]), () => r.feed, x => r.feed = x)],
-        ['Ландшафт', sel(Object.entries(B.RIVER_LANDSCAPE).map(([k, q]) => [k, `${q.name}, i ${q.slope[0]}…${q.slope[1]}`]), () => r.landscape, x => r.landscape = x)],
-        ['Cv, Cs/Cv', h('span', { class: 'pair' }, num(() => r.Cv, x => r.Cv = U.clamp(x ?? 0.3, 0.05, 1.5), { step: 0.05, w: 70 }), num(() => r.CsCv, x => r.CsCv = x ?? 2, { step: 0.5, w: 60 }))],
-        ['Заторы при вскрытии', chk(() => r.iceJams, x => r.iceJams = x)],
-        ['Навигация, сут', h('span', { class: 'pair' }, num(() => r.navMean, x => r.navMean = x ?? 180, { step: 1, w: 70, title: 'Средняя длительность' }), '±', num(() => r.navSd, x => r.navSd = x ?? 9, { step: 1, w: 56 }))],
-        ['РСУ: t, сут', h('span', { class: 'pair' }, rsuIn, sel([['1', 'подряд'], ['0', 'в сумме']], () => hy.rsuConsecutive ? '1' : '0', x => hy.rsuConsecutive = x === '1'))]]),
-      h('div', { class: 'row' }, btn('Сгенерировать ряды', () => change(() => Hy.generate(V)), 'primary'), btn('🎲', () => change(() => { r.seedOffset = B.newSeed(); Hy.generate(V); }), null, 'Другая реализация ряда'),
-        stale ? h('span', { class: 'warnnote' }, 'данные изменены — перегенерируйте') : null, !synthetic && hy.series.length ? h('span', { class: 'note' }, 'ряд загружен таблицей') : null),
-      sub('Ветер'),
-      kv([['Скорость, разгон', h('span', { class: 'pair' }, num(() => hy.wind.v, x => hy.wind.v = x, { w: 70 }), 'м/с', num(() => hy.wind.fetch, x => hy.wind.fetch = x, { w: 70 }), 'км')]]));
-
-    const svg = svgEl('chart'), ser = hy.series; ySel = U.clamp(ySel, 0, Math.max(0, ser.length - 1));
-    const ann = Hy.annualTable(V), rsu = Hy.rsuTable(V);
-    const rows = ann.map((a, j) => h('tr', { class: j === ySel ? 'sel' : '', onclick: () => { ySel = j; renderHydro(); } },
-      h('td', {}, a.year + (a.jam ? '*' : '')), h('td', { class: 'num' }, U.fmt(a.P)), h('td', { class: 'num' }, rsu[j].navDays ?? ''), hy.rsuT.map(t => h('td', { class: 'num' }, U.fmt(rsu[j].values[t])))));
-    const right = h('div', {},
-      synthetic ? card(null, svg) : null,
-      card(null, h('div', { class: 'scroll' }, tbl(['Год', 'П, м', 'Навиг.', ...hy.rsuT.map(t => 't=' + t)], rows)),
-        h('p', { class: 'note' }, `П — превышение годового максимума над нулём поста ${U.fmt(z0)}; t=… — max уровень на посту при прекращении навигации на t суток${hy.rsuConsecutive ? ' подряд' : ''}.${ann.some(a => a.jam) ? ' * — затор.' : ''}`)));
-    box.append(h('div', { class: 'grid-half' }, left, right));
-    if (synthetic) C.hydrograph(svg, V, ySel, { W: 720, H: 280 });
+        btn('+ строка', () => change(() => lib.push({ id: 'u' + Date.now(), zone: 'floodplain', m: null, verified: false, src: '', text: '' })))));
+    const dep = P.depths(V);
+    const s6 = step(6, 'Промеры глубин для студентов', kv([['Уровень воды на дату изысканий', num(() => g.surveyLevel, x => g.surveyLevel = x), 'м', 'Ноль измерения глубин']]),
+      h('div', { class: 'scroll', style: 'max-height:260px' }, tbl(['Створ', 'Глубина, м', ''], dep.map(d => h('tr', {}, h('td', {}, d.st), h('td', { class: 'num' }, U.fmt(d.h)), h('td', { class: 'note' }, d.i === I.iL ? 'левая бровка' : d.i === I.iR ? 'правая бровка' : ''))))));
+    const s7 = step(7, 'Высокий исторический уровень', kv([
+      ['Отметка ВИУ, год', pairNum(() => hy.viu.z, x => { hy.viu.z = x; hy.viu.auto = x == null; }, () => hy.viu.year, x => hy.viu.year = x | 0, { w: 90 }, { step: 1, w: 70 })],
+      ['Известный объект', txt(() => hy.viu.refName, x => hy.viu.refName = x)], ['Отметка объекта', num(() => hy.viu.refZ, x => hy.viu.refZ = x), sv.viuExcess != null ? `→ студенту: выше на ${U.fmt(sv.viuExcess)} м` : '']]));
+    const s8 = step(8, 'Наблюдения на водомерном посту', kv([
+      ['Наблюдения: с года, число лет', pairNum(() => post.firstYear, x => post.firstYear = x | 0, () => post.nYears, x => post.nYears = U.clamp(x | 0, 3, 100), { step: 1 }, { step: 1, w: 60 })],
+      ['Пост от оси перехода', num(() => post.offsetKm, x => post.offsetKm = x ?? 0, { step: 0.1, title: '0 — в створе; > 0 — ниже по течению: студент переносит уровни на ось (морфоствор) по уклону' }), post.offsetKm ? `км → перенос ${U.fmt(hy.slope.i * post.offsetKm * 1000)} м` : 'км (0 — в створе)'],
+      ['Нуль поста', num(() => post.zero, x => post.zero = x, { auto: () => post.zero == null, ph: 'УНМ−2: ' + U.fmt(z0) }), 'м'],
+      ['min УВВ за историю', num(() => r.zLo, x => r.zLo = x, { auto: () => r.zLo == null, ph: 'авто ' + U.fmt(auto.zLo) }), Pof(r.zLo ?? auto.zLo)],
+      ['max УВВ за историю', num(() => r.zHi, x => r.zHi = x, { auto: () => r.zHi == null, ph: 'авто ' + U.fmt(auto.zHi) }), Pof(r.zHi ?? auto.zHi)]]));
+    box.append(h('div', { class: 'grid-half' }, h('div', {}, s5, s7, s8), h('div', {}, s6)));
   }
 
-  /* ================= Топография ================= */
+  /* ---------- 9–12. Ряды наблюдений ---------- */
+  function renderSeries() {
+    const box = pane('series'), hy = V.hydro, r = hy.regime, Hy = B.hydrology, z0 = Hy.postZero(V);
+    const synthetic = !!(hy.series.length && hy.series[0].daily), stale = synthetic && hy.seriesStamp !== Hy.stamp(V);
+    const s9 = step(9, 'Тип реки', kv([['Питание', sel(Object.entries(B.RIVER_FEED).map(([k, q]) => [k, q.name]), () => r.feed, x => r.feed = x)],
+      ['Ландшафт', sel(Object.entries(B.RIVER_LANDSCAPE).map(([k, q]) => [k, `${q.name}, i ${q.slope[0]}…${q.slope[1]}`]), () => r.landscape, x => r.landscape = x)],
+      ['Cv, Cs/Cv', pairNum(() => r.Cv, x => r.Cv = U.clamp(x ?? 0.3, 0.05, 1.5), () => r.CsCv, x => r.CsCv = x ?? 2, { step: 0.05, w: 70 }, { step: 0.5, w: 60 })],
+      ['Заторы при вскрытии', chk(() => r.iceJams, x => r.iceJams = x)]]));
+    const svg = svgEl('chart'), ser = hy.series; ySel = U.clamp(ySel, 0, Math.max(0, ser.length - 1));
+    const s10 = step(10, 'Годовые графики уровней',
+      h('div', { class: 'row' }, btn('Сгенерировать', () => change(() => Hy.generate(V)), 'primary'), btn('🎲', () => change(() => { r.seedOffset = B.newSeed(); Hy.generate(V); }), null, 'Другая реализация ряда'),
+        stale ? h('span', { class: 'warnnote' }, 'исходные данные изменены — перегенерируйте') : null, !synthetic && ser.length ? h('span', { class: 'note' }, 'ряд загружен таблицей, графиков нет') : null),
+      synthetic ? svg : null);
+    const ann = Hy.annualTable(V), half = Math.ceil(ann.length / 2);
+    const s11 = step(11, 'Таблица превышений годовых максимумов', h('p', { class: 'note' }, `Над нулём поста ${U.fmt(z0)} м. Строка — выбор года на графике.`),
+      tbl(['Год', 'П, м', 'Год', 'П, м'], U.range(half, k => h('tr', {}, [ann[k], ann[k + half]].map((a, j) => a ? [h('td', { class: k + j * half === ySel ? 'sel' : '', onclick: () => { ySel = k + j * half; renderSeries(); } }, a.year + (a.jam ? '*' : '')), h('td', { class: 'num' }, U.fmt(a.P))] : [h('td', {}), h('td', {})])))));
+    const rsu = Hy.rsuTable(V), rsuIn = h('input', { type: 'text', value: hy.rsuT.join(', '), style: 'width:130px', title: 'N, сут через запятую' });
+    rsuIn.onchange = () => change(() => { const t = rsuIn.value.split(/[;,\s]+/).map(Number).filter(q => Number.isFinite(q) && q >= 0).map(Math.round); if (t.length) hy.rsuT = [...new Set(t)].sort((a, b) => a - b); });
+    const s12 = step(12, 'Таблица для РСУ', kv([['N, сут', h('span', { class: 'pair' }, rsuIn, sel([['1', 'подряд'], ['0', 'в сумме']], () => hy.rsuConsecutive ? '1' : '0', x => hy.rsuConsecutive = x === '1'))],
+      ['Навигация: средняя, разброс', pairNum(() => r.navMean, x => r.navMean = x ?? 180, () => r.navSd, x => r.navSd = x ?? 9, { step: 1, w: 70 }, { step: 1, w: 56 }), 'сут']]),
+      h('div', { class: 'scroll' }, tbl(['Год', 'Навиг., сут', ...hy.rsuT.map(t => 'N=' + t)], rsu.map(rw => h('tr', {}, h('td', {}, rw.year), h('td', { class: 'num' }, rw.navDays ?? ''), hy.rsuT.map(t => h('td', { class: 'num' }, U.fmt(rw.values[t]))))))),
+      h('p', { class: 'note' }, 'Максимальный уровень за навигацию, если не учитывать N суток с наивысшими уровнями (отметки на посту).'));
+    box.append(h('div', { class: 'grid-half' }, h('div', {}, s9, s10, s11), s12));
+    if (synthetic) C.hydrograph(svg, V, ySel, { W: 720, H: 260 });
+  }
+
+  /* ---------- 13–14. Ветер и судоходство ---------- */
+  function renderMeteo() {
+    const box = pane('meteo'), hy = V.hydro, t = V.tz;
+    box.append(h('div', { class: 'grid-half' },
+      step(13, 'Ветер', kv([['Расчётная скорость ветра', num(() => hy.wind.v, x => hy.wind.v = x), 'м/с'], ['Длина разгона волны', num(() => hy.wind.fetch, x => hy.wind.fetch = x), 'км']])),
+      step(14, 'Судоходство', kv([['Класс реки по судоходству', sel(B.NAV_CLASSES.map(c => [c, c]), () => t.navClass, x => t.navClass = x)]]),
+        h('p', { class: 'note' }, 'Навигационные уровни — п. 12.'))));
+  }
+
+  /* ---------- 15–16. Дорога ---------- */
+  function renderRoad() {
+    const box = pane('road'), t = V.tz, g = V.geodesy, I = P.idx(g), N = I.N;
+    const s15 = step(15, 'Проектируемая дорога', kv([
+      ['Категория', sel(B.ROAD_CATEGORIES.map(c => [c, c]), () => t.roadCategory, x => t.roadCategory = x)],
+      ['Состав: полос движения', num(() => t.lanes, x => t.lanes = x, { step: 1 })],
+      ['Расположение, развитость района', txt(() => t.region, x => t.region = x)],
+      ['Уровень ответственности', sel(Object.entries(B.IMPORTANCE), () => t.importance, x => t.importance = Number(x))],
+      ['Вероятность превышения', num(() => t.prob, x => t.prob = x, { step: 0.0001 }), t.prob ? `доля (${U.fmt(t.prob * 100, 2)} %)` : 'доля'],
+      ['Доп. информация', txt(() => t.addInfo, x => t.addInfo = x)]]));
+    const rows = t.road.map((q, k) => h('tr', {}, h('td', {}, num(() => q.st, x => q.st = U.clamp(Math.round(x ?? 1), 1, N), { step: 1, w: 64 })),
+      h('td', { class: 'num' }, U.fmt(g.z[q.st - 1])), h('td', {}, num(() => q.z, x => q.z = x, { w: 84 })), h('td', {}, btn('✕', () => change(() => t.road.splice(k, 1))))));
+    const s16 = step(16, 'Характерные точки оси дороги на подходах', Array.from(profileCard([]).childNodes),
+      tbl(['Створ', 'Земля, м', 'ПЧ, м', ''], rows),
+      h('div', { class: 'row' }, btn('+ точка', () => change(() => t.road.push({ st: 1, z: t.road[0]?.z ?? null, label: '' }))), btn('По умолчанию', () => change(() => t.road = B.schema.autoRoad(V)), null, 'Края и подошвы берегов')),
+      h('p', { class: 'note' }, `Только на берегах: створы 1–${I.bl + 1} и ${I.br + 1}–${N}. На поймах и в русле ось определяет студент.`));
+    box.append(h('div', { class: 'grid2' }, s15, s16));
+  }
+
+  /* ---------- 17. Топоповерхность ---------- */
   function renderTopo() {
     const box = pane('topo'), t = V.topo, w = P.widths(V.geodesy);
     const cv = h('canvas', { class: 'topo', width: 640, height: 640 }), info = h('span', { class: 'note' });
     const build = () => { topoCache = B.topo.generate(V); paintTopo(cv, topoCache); info.textContent = `${topoCache.points.length} точек`; };
     const csv = (sep, comma, sfx) => () => { if (!topoCache) build(); download(fname('Топоповерхность' + sfx, 'csv'), (comma ? '﻿' : '') + B.topo.toCSV(topoCache, sep, comma), 'text/csv'); };
-    box.append(h('div', { class: 'grid2' }, card('Топоповерхность', kv([
-      ['Радиус реки в плане', num(() => t.radius, x => { t.radius = x ?? 0; topoCache = null; }, { step: 500, title: '0 — прямая; > 0 — изгиб влево, < 0 — вправо' }), 'м'],
+    box.append(h('div', { class: 'grid2' }, step(17, 'Топоповерхность', kv([
+      ['Радиус реки в плане', num(() => t.radius, x => { t.radius = x ?? 0; topoCache = null; }, { step: 500, title: '0 — прямая; +R — изгиб влево, −R — вправо' }), 'м'],
       ['Сторона квадрата', num(() => t.size, x => { t.size = x; topoCache = null; }, { auto: () => t.size == null, ph: String(w.total), step: 50 }), 'м'],
       ['Шаг сетки', num(() => t.gridStep, x => { t.gridStep = U.clamp(x ?? 10, 1, 200); topoCache = null; }, { step: 1 }), 'м'],
-      ['Неровности пойм', num(() => t.amp, x => { t.amp = x ?? 0; topoCache = null; }, { step: 0.1 }), 'м'],
+      ['Неровности рельефа', num(() => t.amp, x => { t.amp = x ?? 0; topoCache = null; }, { step: 0.1 }), 'м'],
       ['Зерно', h('span', { class: 'pair' }, num(() => t.seed, x => { t.seed = x | 0; topoCache = null; }, { step: 1, w: 90 }), btn('🎲', () => change(() => { t.seed = B.newSeed(); topoCache = null; })))]]),
       h('div', { class: 'row' }, btn('CSV (X;Y;Z)', csv(';', true, ''), 'primary', 'Разделитель «;», десятичная запятая'), btn('CSV (x,y,z)', csv(',', false, '_dot'), null, 'Разделитель «,», десятичная точка'), info),
-      h('p', { class: 'note' }, 'Ось дороги — Y = 0, сечение по ней совпадает с профилем. Y — по течению.')),
+      h('p', { class: 'note' }, 'Квадрат в плане, ось дороги — его центральная ось (Y = 0); сечение по ней совпадает с профилем. Y — по течению.')),
       card(null, cv)));
     build();
   }
+  const toISO = s => { const q = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(s || ''); return q ? `${q[3]}-${q[2]}-${q[1]}` : ''; };
+  const fromISO = s => { const q = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || ''); return q ? `${q[3]}.${q[2]}.${q[1]}` : ''; };
+
   function paintTopo(cv, res) {
     const ctx = cv.getContext('2d'), n = res.n, W = cv.width, cell = W / n, zs = res.points.map(p => p[2]), lo = Math.min(...zs), hi = Math.max(...zs), unm = V.hydro.unm;
     const col = z => { if (z < unm) { const t = U.clamp((unm - z) / Math.max(0.5, unm - lo), 0, 1); return `rgb(${Math.round(140 - 90 * t)},${Math.round(185 - 80 * t)},${Math.round(230 - 40 * t)})`; }
@@ -273,17 +286,25 @@
   /* ================= Выдача ================= */
   const exportOpts = { key: true, daily: true };
   function renderOut() {
-    const box = pane('out'), msgs = B.schema.validate(V);
-    const tools = card(null, h('div', { class: 'row' },
-      btn('Бланк Excel', exportXlsx, 'primary', 'Бланк задания и, по выбору, ключ преподавателя с формулами и суточные уровни'),
-      chk(() => exportOpts.key, x => exportOpts.key = x, 'ключ'), chk(() => exportOpts.daily, x => exportOpts.daily = x, 'суточные уровни'),
-      btn('Печать / PDF', () => { document.body.classList.add('printing'); window.print(); setTimeout(() => document.body.classList.remove('printing'), 500); }),
-      h('span', { class: 'sep' }),
-      btn('Книга данных', exportData, null, 'Машиночитаемая книга Excel: заполняется вне программы и загружается кнопкой «Открыть»'),
-      btn('JSON', () => download(fname('Вариант', 'json'), JSON.stringify(V, null, 1), 'application/json'))),
-      h('ul', { class: 'msgs' }, msgs.map(m => h('li', { class: m.lvl }, m.sec ? h('b', {}, m.sec + ': ') : null, m.t))));
+    const box = pane('out'), msgs = B.schema.validate(V), m = V.meta;
+    const head = step(18, 'Бланк задания', h('div', { class: 'grid-half' },
+      kv([['Шифр варианта', txt(() => m.code, x => m.code = x)], ['Студент', txt(() => m.student, x => m.student = x)], ['Группа', txt(() => m.group, x => m.group = x)],
+        ['Курс, семестр', h('span', { class: 'pair' }, num(() => m.course, x => m.course = x, { step: 1, w: 60 }), txt(() => m.semester, x => m.semester = x))]]),
+      kv([['Преподаватель', txt(() => m.teacher, x => m.teacher = x)], ['Дата выдачи', h('input', { type: 'date', value: toISO(m.issueDate), onchange: e => change(() => m.issueDate = fromISO(e.target.value)) })]])),
+      more('Шапка, цель, задачи, сроки',
+        kv([['Дисциплина', txt(() => m.discipline, x => m.discipline = x)], ['Код направления', txt(() => m.dirCode, x => m.dirCode = x)], ['Кафедра', txt(() => m.department, x => m.department = x)], ['Год в именах файлов', num(() => m.year, x => m.year = x, { step: 1 })]]),
+        sub('Цель'), txt(() => m.goal, x => m.goal = x, { area: true, rows: 2 }), sub('Задачи'), txt(() => m.tasks, x => m.tasks = x, { area: true, rows: 5 }),
+        sub('Контрольные сроки'), (m.deadlines || []).map((_, k) => h('div', { class: 'row' }, txt(() => m.deadlines[k], x => m.deadlines[k] = x, { ph: `Этап ${k + 1} — дата` })))),
+      h('div', { class: 'row' },
+        btn('Бланк Excel', exportXlsx, 'primary', 'Бланк задания и, по выбору, ключ преподавателя с формулами и суточные уровни'),
+        chk(() => exportOpts.key, x => exportOpts.key = x, 'ключ'), chk(() => exportOpts.daily, x => exportOpts.daily = x, 'суточные уровни'),
+        btn('Печать / PDF', () => { document.body.classList.add('printing'); window.print(); setTimeout(() => document.body.classList.remove('printing'), 500); }),
+        h('span', { class: 'sep' }),
+        btn('Книга данных', exportData, null, 'Машиночитаемая книга Excel: заполняется вне программы и загружается кнопкой «Открыть»'),
+        btn('JSON', () => download(fname('Вариант', 'json'), JSON.stringify(V, null, 1), 'application/json'))),
+      h('ul', { class: 'msgs' }, msgs.map(q => h('li', { class: q.lvl }, q.sec ? h('b', {}, q.sec + ': ') : null, q.t))));
     const pages = h('div', {}); pages.innerHTML = blankHTML();
-    box.append(h('div', { class: 'noprint' }, tools), pages);
+    box.append(h('div', { class: 'noprint' }, head), pages);
   }
   async function schemePng() {
     const svg = svgEl(); svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');

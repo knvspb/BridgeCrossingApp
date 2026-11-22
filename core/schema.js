@@ -64,7 +64,7 @@
       geology: { ubv: 105, corr: 10, seed: seed + 7, layers: S.defaultLayers() },
       topo: { radius: 0, gridStep: 10, size: null, amp: 0.3, seed: seed + 13 },
       gen: { profile: { seed, zOutL: 131, zFootL: 129, shapeBL: 1, zBrowL: 123, shapeL: 1.6, noiseL: 0.6, oxL: 2.5, oxPosL: 0.6,
-        zThal: 117.9, thalPos: 0.6, shapeC: 1.6, noiseC: 0.3, zBrowR: 123, shapeR: 1.4, noiseR: 0.6, oxR: 1.5, oxPosR: 0.2, zFootR: 129, zOutR: 131, shapeBR: 1, precision: 2 } },
+        zThal: 117.9, thalPos: 0.6, shapeC: 1.6, noiseC: 0.3, zBrowR: 123, shapeR: 1.4, noiseR: 0.6, oxR: 1.5, oxPosR: 0.2, zFootR: 129, zOutR: 131, shapeBR: 1, precision: 1 } },
       library: { roughness: U.deepClone(R) }
     };
     v.geology.layers.forEach(l => { l.tops = new Array(z.length).fill(null); });
