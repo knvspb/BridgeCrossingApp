@@ -187,7 +187,7 @@
         pts.push([U.r2(X), U.r2(y), U.r2(z)]);
       }
     }
-    return { n, step, L, off, narrow: t.narrow || 'generalize', sharpTips: t.sharpTips ?? true, keepAxis: t.keepAxis ?? true, axisWin: t.axisWin ?? 10, prof: { x: x.map(q => q + off), z: g.z.slice() }, points: pts, axis, wl, chanHalf: hw, waterLevel: wl0, slope, valleySlope: iv, sinuosity: K, lakes: lakes.length, ravines: ravines.length };
+    return { n, step, L, off, narrow: t.narrow || 'generalize', sharpTips: t.sharpTips ?? true, keepAxis: t.keepAxis ?? true, axisWin: t.axisWin ?? 10, axisTr: t.axisTr ?? 60, prof: { x: x.map(q => q + off), z: g.z.slice() }, points: pts, axis, wl, chanHalf: hw, waterLevel: wl0, slope, valleySlope: iv, sinuosity: K, lakes: lakes.length, ravines: ravines.length };
   };
 
   /* ---------- изолинии ---------- */
@@ -341,8 +341,8 @@
     const loopMin = mode === 'keep' || !(Rmin > 0) ? 0 : 2 * Math.PI * Rt, passes = 7;
     /* сохранение профиля у оси дороги: в окне |y| ≤ win сглаженная поверхность заменяется исходной, причём сечение
        по оси — точно профиль задания (по створам), далее плавный переход к сглаженной на ширине max(20 м, 2 шага) */
-    const keepAxis = opt.keepAxis ?? res.keepAxis ?? true, win = U.clamp(opt.axisWin ?? res.axisWin ?? 10, 2, 20);
-    const key = [level, Rmin, interval, mode, sharp, keepAxis, win].join('|'); res._disp = res._disp || {}; if (res._disp[key]) return res._disp[key];
+    const keepAxis = opt.keepAxis ?? res.keepAxis ?? true, win = U.clamp(opt.axisWin ?? res.axisWin ?? 10, 2, 20), trAx = U.clamp(opt.axisTr ?? res.axisTr ?? 60, 10, 300);
+    const key = [level, Rmin, interval, mode, sharp, keepAxis, win, trAx].join('|'); res._disp = res._disp || {}; if (res._disp[key]) return res._disp[key];
     const n = res.n, z0 = Float64Array.from(res.points, p => p[2]), s0 = T.SMOOTH_SIGMA[level];
     const sig = [s0, Math.max(s0 * 1.7, 2.5), Math.max(s0 * 2.6, 4), Math.max(s0 * 4, 6)];          // ступени σ (в узлах сетки)
     /* в русле — дополнительное сглаживание ВДОЛЬ ОСИ РУСЛА (окно σ ≈ 80 м, на том же смещении от оси):
@@ -392,20 +392,24 @@
       for (let x = 0; x < n; x++) chM[y * n + x] = 1 - smooth((Math.abs(x * res.step - cx) / res.chanHalf - 0.5) / 0.3); }   // ядро русла, бровки сглаживаются как обычно
     const free = (x, y) => { const i = Math.round(x / res.step), j = Math.round((y + res.L / 2) / res.step); return i >= 0 && j >= 0 && i < n && j < n && guard[j * n + i] > 0.5; };
     let zc, fine, levels, lines, tight = [];
-    const tr = Math.max(60, 5 * res.step), wAx = y => { const a = Math.abs(y); return a <= win ? 1 : 1 - smooth((a - win) / tr); };
+    const tr = trAx, wAx = y => { const a = Math.abs(y); return a <= win ? 1 : 1 - smooth((a - win) / tr); };
     const rawAt = (X, y) => { const fx = U.clamp(X / res.step, 0, n - 1), fy = U.clamp((y + res.L / 2) / res.step, 0, n - 1), i = Math.min(n - 2, Math.floor(fx)), j = Math.min(n - 2, Math.floor(fy)), a = fx - i, b = fy - j, Z = (ii, jj) => res.points[jj * n + ii][2];
       return (Z(i, j) * (1 - a) + Z(i + 1, j) * a) * (1 - b) + (Z(i, j + 1) * (1 - a) + Z(i + 1, j + 1) * a) * b; };
     const profAt = X => res.prof && X >= res.prof.x[0] && X <= res.prof.x[res.prof.x.length - 1] ? U.interp(res.prof.x, res.prof.z, X) : rawAt(X, 0);
-    /* поправка d(X) = профиль − сглаженное сечение по оси; добавляется с весом w(y): на оси — точно профиль,
-       по сторонам — тот же сглаженный рельеф, сдвинутый по высоте (без «площадок» на уровне горизонтали) */
+    /* в окне |y| ≤ win — сечение по оси, продолженное поперёк оси без изменений (горизонтали в окне перпендикулярны
+       оси, на площадках профиля на уровне воды или горизонтали нет «съезда» вдоль оси); далее вес w плавно (C¹) спадает
+       до нуля на длине перехода trAx — горизонтали плавно уходят с отметок профиля на сглаженное положение */
     /* цель на оси: на поймах и берегах — профиль по створам; в русле — исходная поверхность по узлам сетки (острая
        вершина тальвега между узлами сеткой не передаётся и на оси выглядела бы ямой, которой нет вдоль русла) */
     const cx0 = res.axis ? U.interp(res.axis.map(q => q[1]), res.axis.map(q => q[0]), 0) : 0, hw = res.chanHalf || 0;
     const targetAt = X => { const m = hw ? 1 - smooth((Math.abs(X - cx0) / hw - 1) / 0.3) : 0; return profAt(X) * (1 - m) + rawAt(X, 0) * m; };
     const axisBlend = (fn, zcc) => {
-      const fix = (z, m, h) => { const fy = (res.L / 2) / h, j0 = Math.min(m - 2, Math.floor(fy)), ty = fy - j0, d = new Float64Array(m);
-        for (let i = 0; i < m; i++) d[i] = targetAt(i * h) - (z[j0 * m + i] * (1 - ty) + z[(j0 + 1) * m + i] * ty);
-        for (let j = 0; j < m; j++) { const w = wAx(-res.L / 2 + j * h); if (!(w > 0)) continue; for (let i = 0; i < m; i++) z[j * m + i] += w * d[i]; } };
+      /* площадки профиля точно на уровне горизонтали или воды (±5 см): отметка сдвигается не более чем на 3 см к сглаженной
+         поверхности — площадка оказывается по ту же сторону уровня, что и рельеф рядом, и линия не «съезжает» вдоль оси */
+      const wl0 = res.wl ? T.wlAt(res, 0) : NaN, nearLvl = v => Math.min(Math.abs(v - Math.round(v / interval) * interval), Math.abs(v - wl0) || Infinity) < 0.05;
+      const fix = (z, m, h) => { const tg = new Float64Array(m), fy = (res.L / 2) / h, j0 = Math.min(m - 2, Math.floor(fy)), ty = fy - j0;
+        for (let i = 0; i < m; i++) { const v = targetAt(i * h), s = z[j0 * m + i] * (1 - ty) + z[(j0 + 1) * m + i] * ty; tg[i] = nearLvl(v) ? v + U.clamp(s - v, -0.03, 0.03) : v; }
+        for (let j = 0; j < m; j++) { const w = wAx(-res.L / 2 + j * h); if (!(w > 0)) continue; for (let i = 0; i < m; i++) z[j * m + i] = z[j * m + i] * (1 - w) + w * tg[i]; } };
       fix(fn.z, fn.nf, res.step / F); fix(zcc, n, res.step); };
     /* сходы горизонталей: на конце вытянутой формы на склоне (гряда, ложбина) горизонталь разворачивается «языком»;
        при sharp такие развороты не добиваются до Rmin усиленным сглаживанием — остаются естественно острыми */
@@ -429,7 +433,7 @@
     const allTight = Rmin > 0 ? tightPoints(lines.flatMap(c => c.lines), Rt, ds) : [], freeTight = allTight.filter(q => free(q[0], q[1]));
     const steepN = freeTight.filter(steep).length, remaining = freeTight.length - steepN, inGuard = allTight.length - freeTight.length;
     const dropped = loopMin > 0 ? levels.reduce((s, L) => s + isoOn(grid, fine.z, L).filter(l => l.closed && T.lineLength(l) < loopMin).length, 0) : 0;
-    const out = { n, zc, fine, grid, contours: lines, interval, mode, Rt, keepAxis, axisWin: win, remaining, tips: steepN, inGuard, dropped, smoothedNodes: wmap.reduce((s, w) => s + (w > 0.05 ? 1 : 0), 0) };
+    const out = { n, zc, fine, grid, contours: lines, interval, mode, Rt, keepAxis, axisWin: win, axisTr: trAx, remaining, tips: steepN, inGuard, dropped, smoothedNodes: wmap.reduce((s, w) => s + (w > 0.05 ? 1 : 0), 0) };
     res._disp[key] = out; return out;
   };
   /* Горизонтали: [{ level, lines: [{ pts, closed }] }] — изолинии сглаженной поверхности (не пересекаются). */
