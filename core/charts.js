@@ -21,7 +21,7 @@
       if (h.viu.z != null) levels.push(h.viu.z);
       if (h.series.length) levels.push(Math.max(...h.series.map(s => s.zMax)));
     }
-    const road = (v.tz.axisPoints || []).filter(p => p.z != null && p.st >= 1 && p.st <= N);
+    const road = (v.tz.road || []).filter(p => p.z != null && p.st >= 1 && p.st <= N);
     const hi = Math.max(...g.z, ...levels, ...(opt.showRoad !== false ? road.map(p => p.z) : [])) + 1;
     const lo = Math.min(opt.showSoil !== false ? v.geology.ubv : Infinity, ...g.z) - 1;
     const sx = q => M.l + q / xmax * (W - M.l - M.r), sy = q => M.t + (hi - q) / (hi - lo) * (H - M.t - M.b);
@@ -32,8 +32,11 @@
       add(C.el('line', { x1: M.l, x2: W - M.r, y1: sy(q), y2: sy(q), stroke: '#ece9e1' }));
       add(C.el('text', { x: M.l - 6, y: sy(q) + 4, 'text-anchor': 'end', 'font-size': 11, fill: '#5f6770' }, String(+q.toFixed(2)).replace('.', ',')));
     }
-    [[0, x[g.iL], 'Левая пойма'], [x[g.iL], x[g.iR], 'Русло'], [x[g.iR], xmax, 'Правая пойма']].forEach(([a, b, t]) => add(C.el('text', { x: (sx(a) + sx(b)) / 2, y: 15, 'text-anchor': 'middle', 'font-size': 12, fill: '#5f6770' }, t)));
-    [g.iL, g.iR].forEach(i => add(C.el('line', { x1: sx(x[i]), x2: sx(x[i]), y1: M.t, y2: H - M.b, stroke: '#c9c4b6', 'stroke-dasharray': '3 3' })));
+    const I = BCA.profile.idx(g), bnd = [0, I.bl, I.iL, I.iR, I.br, N - 1];
+    BCA.profile.ZONES.forEach((k, j) => { const a = x[bnd[j]], b = x[bnd[j + 1]], wide = sx(b) - sx(a) > 70;
+      if (k === 'BL' || k === 'BR') add(C.el('rect', { x: sx(a), y: M.t, width: sx(b) - sx(a), height: H - M.t - M.b, fill: '#efece4', opacity: 0.6 }));
+      add(C.el('text', { x: (sx(a) + sx(b)) / 2, y: 15, 'text-anchor': 'middle', 'font-size': 12, fill: '#5f6770' }, wide ? BCA.profile.ZONE_NAME[k] : BCA.profile.ZONE_SHORT[k])); });
+    bnd.slice(1, 5).forEach(i => add(C.el('line', { x1: sx(x[i]), x2: sx(x[i]), y1: M.t, y2: H - M.b, stroke: '#c9c4b6', 'stroke-dasharray': '3 3' })));
     if (opt.showSoil !== false) {
       const B = BCA.profile.bottoms(v), mode = opt.mode || {};
       v.geology.layers.forEach((l, k) => {
@@ -64,7 +67,7 @@
     }
     if (opt.showRoad !== false && road.length) {
       const pts = road.slice().sort((a, b) => a.st - b.st);
-      pts.forEach(p => { const px = sx(x[p.st - 1]), py = sy(p.z); add(C.el('circle', { cx: px, cy: py, r: 3.5, fill: '#7b3fa0' })); add(C.el('text', { x: px + (p.st - 1 < N / 2 ? 6 : -6), y: py - 6, 'font-size': 11, fill: '#7b3fa0', 'text-anchor': p.st - 1 < N / 2 ? 'start' : 'end' }, 'ПЧ ' + U.fmt(p.z))); });
+      pts.forEach((p, k) => { const px = sx(x[p.st - 1]), py = sy(p.z); add(C.el('circle', { cx: px, cy: py, r: 3.5, fill: '#7b3fa0' })); if (k === 0 || k === pts.length - 1) add(C.el('text', { x: px + (p.st - 1 < N / 2 ? 6 : -6), y: py - 6, 'font-size': 11, fill: '#7b3fa0', 'text-anchor': p.st - 1 < N / 2 ? 'start' : 'end' }, 'ПЧ ' + U.fmt(p.z))); });
       for (let k = 0; k < pts.length - 1; k++) add(C.el('line', { x1: sx(x[pts[k].st - 1]), y1: sy(pts[k].z), x2: sx(x[pts[k + 1].st - 1]), y2: sy(pts[k + 1].z), stroke: '#7b3fa0', 'stroke-width': 1, 'stroke-dasharray': '1 5', opacity: 0.6 }));
     }
     add(C.el('path', { d: g.z.map((q, i) => (i ? 'L' : 'M') + sx(x[i]) + ' ' + sy(q)).join(''), fill: 'none', stroke: '#3b2f22', 'stroke-width': (opt.mode?.kind || 'ground') === 'ground' ? 2.2 : 1.5 }));
@@ -72,7 +75,7 @@
       const every = N > 120 ? 10 : 5;
       for (let i = 0; i < N; i++) {
         if (opt.dots !== false) add(C.el('circle', { cx: sx(x[i]), cy: sy(g.z[i]), r: opt.sel === i ? 4 : 1.8, fill: opt.sel === i ? '#1d5fa8' : '#3b2f22' }));
-        if (i % every === 0 || i === g.iL || i === g.iR || i === N - 1) add(C.el('text', { x: sx(x[i]), y: H - M.b + 14, 'text-anchor': 'middle', 'font-size': 10.5, fill: '#5f6770' }, i + 1));
+        if (i % every === 0 || bnd.includes(i)) add(C.el('text', { x: sx(x[i]), y: H - M.b + 14, 'text-anchor': 'middle', 'font-size': 10.5, fill: '#5f6770' }, i + 1));
       }
     }
     add(C.el('text', { x: (W + M.l) / 2, y: H - 6, 'text-anchor': 'middle', 'font-size': 11, fill: '#5f6770' }, `№ створа · длина профиля ${Math.round(xmax)} м · отметки, м`));

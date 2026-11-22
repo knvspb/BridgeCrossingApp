@@ -18,7 +18,7 @@
     const R = Number(t.radius) || 0, i = v.hydro.slope.i || 0, rng = BCA.rng(t.seed | 0);
     const noise = BCA.smoothNoise2D(rng, n, n, Math.max(3, Math.round(n / 8)));
     const noiseFine = BCA.smoothNoise2D(rng, n, n, Math.max(2, Math.round(n / 25)));
-    const xL = x[g.iL], xR = x[g.iR], xc = (xL + xR) / 2, half = (xR - xL) / 2;
+    const I = BCA.profile.idx(g), xL = x[I.iL], xR = x[I.iR], xc = (xL + xR) / 2, half = (xR - xL) / 2;
     const zEdge = Math.min(g.z[0], g.z[g.z.length - 1]);
     const shift = y => R === 0 ? 0 : (Math.abs(y) >= Math.abs(R) ? Math.sign(R) * Math.abs(R) : R - Math.sign(R) * Math.sqrt(R * R - y * y));
     const curv = R === 0 ? 0 : U.clamp(L / Math.abs(R), 0, 1) * Math.sign(R);   // 0…1 — «сила» изгиба

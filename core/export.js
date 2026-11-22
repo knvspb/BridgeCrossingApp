@@ -1,12 +1,12 @@
 /* Выгрузка в редактируемые форматы: .xlsx (ExcelJS), CSV, JSON.
    Общий сервис для всех модулей: модуль описывает, что выгружать, а оформление и запись — здесь.
    Листы генератора задания:
-     «Задание»            — титульная страница (как стр. 1 бланка 1/26-c);
+     «Задание»            — титульная страница;
      «Исходные данные»     — разделы 1–3 бланка (ТЗ, геодезия, гидрометеорология);
      «Геология»            — раздел 4 (ИГУ и кровли по створам);
      «Ключ преподавателя»  — истинные значения с живыми формулами (проверка студенческих расчётов);
-     «Суточные уровни»     — сгенерированные ежесуточные уровни;
-     «Столбец книги (71)»  — столбец варианта для листа «Исходные данные по вариантам» старой книги. */
+     «Суточные уровни»     — сгенерированные ежесуточные уровни.
+   Машиночитаемая книга данных варианта (для заполнения вне программы) — в dataio.js. */
 (function (root) {
   'use strict';
   const BCA = root.BCA || (root.BCA = {});
@@ -57,7 +57,7 @@
   const addr = (r, c) => colName(c) + r;
 
   X.buildWorkbook = function (ExcelJS, v, opts = {}) {
-    const o = Object.assign({ key: true, daily: true, legacy: true, schemePng: null }, opts);
+    const o = Object.assign({ key: true, daily: true, schemePng: null }, opts);
     const wb = new ExcelJS.Workbook();
     wb.creator = 'BridgeCrossingApp — генератор задания'; wb.created = new Date();
     const m = v.meta, tz = v.tz, g = v.geodesy, h = v.hydro, N = g.z.length;
@@ -108,34 +108,31 @@
     /* ---------- 2. Исходные данные (разделы 1–3) ---------- */
     {
       const ws = wb.addWorksheet('Исходные данные', { pageSetup });
-      ws.columns = [{ width: 30 }, { width: 10 }, { width: 13 }, { width: 9 }, { width: 10 }, { width: 13 }, { width: 9 }, { width: 10 }, { width: 13 }, { width: 10 }];
+      ws.columns = [{ width: 9 }, { width: 11 }, { width: 13 }, { width: 15 }, { width: 9 }, { width: 9 }, { width: 11 }, { width: 11 }, { width: 15 }, { width: 10 }];
       const s = new Sheet(ws);
       s.put(1, 1, 'Приложение №1 к заданию на курсовое проектирование', { size: 10 }); s.put(2, 1, 'Исходные данные', { bold: true, size: 13 }); s.r = 4;
       s.title('1. Техническое задание на проектирование мостового перехода', 12);
       s.put(s.r, 1, 'Данные о проектируемой автомобильной дороге', { bold: true }); s.put(s.r, 6, 'Требования по судоходству', { bold: true }); s.r++;
       const r0 = s.r;
       [['Категория автомобильной дороги', tz.roadCategory], ['Количество полос движения', tz.lanes],
-       ['Отметка по оси ПЧ в начале мостового перехода (створ 1), м', tz.zRoadStart], [`Отметка по оси ПЧ в конце мостового перехода (створ ${N}), м`, tz.zRoadEnd],
        ['Уровень ответственности', BCA.IMPORTANCE[tz.importance] || tz.importance], ['Район строительства', tz.region || '-'], ['Расчётная вероятность превышения', tz.prob], ['Доп. инф.:', tz.addInfo || '-']]
         .forEach(([l, val], k) => { s.put(r0 + k, 1, l, { wrap: true }); ws.mergeCells(r0 + k, 1, r0 + k, 3); s.put(r0 + k, 4, val, { fmt: typeof val === 'number' && val < 1 ? '0.00%' : (typeof val === 'number' && val > 50 ? F2 : undefined), align: 'center' }); });
       s.put(r0, 6, 'Класс реки по судоходству'); ws.mergeCells(r0, 6, r0, 8); s.put(r0, 9, tz.navClass, { align: 'center' });
-      if ((tz.axisPoints || []).length) {
-        s.put(r0 + 2, 6, 'Характерные точки оси дороги на подходах:', { italic: true }); ws.mergeCells(r0 + 2, 6, r0 + 2, 10);
-        s.table(r0 + 3, 6, ['Створ', 'Отметка, м', 'Примечание'], tz.axisPoints.map(p => [p.st, p.z, p.label || '']), [undefined, F2], { textCol: 2 });
-      }
-      s.r = Math.max(r0 + 8, r0 + 4 + (tz.axisPoints || []).length) + 1;
+      s.r = r0 + 7;
 
       s.title('2. Результаты геодезических изысканий', 12);
-      s.kv('Шаг нивелировки на левой пойме, м', g.stepLP, { vcol: 2 }); s.kv('Шаг нивелировки на правой пойме, м', g.stepPP, { vcol: 2 });
-      const comment = i => g.comments?.[i] || (i === 0 ? 'Левый берег' : i === g.iL ? 'Русло' : i === g.iR ? 'Русло' : i === N - 1 ? 'Правый берег' : '');
-      s.put(s.r, 4, 'Левая пойма', { bold: true, align: 'center', box: true }); ws.mergeCells(s.r, 4, s.r, 6);
-      s.put(s.r, 7, 'Правая пойма', { bold: true, align: 'center', box: true }); ws.mergeCells(s.r, 7, s.r, 9); s.r++;
-      const lp = U.range(g.iL + 1, i => [i + 1, g.z[i], comment(i)]), pp = U.range(N - g.iR, k => [g.iR + k + 1, g.z[g.iR + k], comment(g.iR + k)]);
-      const e1 = s.table(s.r, 4, ['Створ', 'Отметка', 'Комментарий'], lp, [undefined, F2]);
-      const e2 = s.table(s.r, 7, ['Створ', 'Отметка', 'Комментарий'], pp, [undefined, F2]);
+      const I = BCA.profile.idx(g), Z = g.zones;
+      const zr0 = s.r, zk = BCA.profile.ZONES.filter(k => k !== 'R');
+      s.r = s.table(s.r, 1, ['Участок', '', 'Шаг нивелировки, м', 'Ширина, м'], zk.map(k => [BCA.profile.ZONE_NAME[k], '', Z[k].step, Z[k].step * Z[k].n]), [], { headH: 30 }) + 1;
+      for (let r = zr0; r < s.r - 1; r++) { ws.mergeCells(r, 1, r, 2); ws.getCell(r, 1).alignment = { horizontal: 'left', vertical: 'middle' }; }
+      const row = i => { const rz = (i <= I.bl || i >= I.br) ? (v.tz.road || []).find(p => p.st === i + 1) : null; return [i + 1, g.z[i], rz ? rz.z : '', BCA.profile.comment(g, i, I)]; };
+      const head = ['Створ', 'Отметка, м', 'Отметка ПЧ, м', 'Комментарий'];
+      const e1 = s.table(s.r, 1, head, U.range(I.iL + 1, row), [undefined, F2, F2], { textCol: 3 });
+      const e2 = s.table(s.r, 6, head, U.range(N - I.iR, k => row(I.iR + k)), [undefined, F2, F2], { textCol: 3 });
       s.r = Math.max(e1, e2) + 1;
       if (o.schemePng) {
         const id = wb.addImage({ base64: o.schemePng, extension: 'png' });
+        ws.getRow(s.r - 1).addPageBreak();
         s.put(s.r, 1, 'Схема мостового перехода', { bold: true }); s.r++;
         ws.addImage(id, { tl: { col: 0, row: s.r - 1 }, ext: { width: 760, height: 300 } });
         s.r += 17;
@@ -144,24 +141,24 @@
       s.title('3. Результаты гидрологических и метеорологических изысканий', 12);
       const r3 = s.r;
       s.put(r3, 1, 'Результаты промера глубин русла', { bold: true });
-      s.put(r3 + 1, 1, 'Шаг промера глубин, м'); s.put(r3 + 1, 2, g.stepR, { align: 'center' });
-      s.put(r3 + 2, 1, 'Отметка нуля измерения глубин, м'); s.put(r3 + 2, 2, g.surveyLevel, { fmt: F2, align: 'center' });
-      const dep = BCA.profile.depths(v).map(d => [d.st, d.h, d.i === g.iL ? 'Левая пойма' : d.i === g.iR ? 'Правая пойма' : '']);
+      s.put(r3 + 1, 1, 'Шаг промера глубин, м'); ws.mergeCells(r3 + 1, 1, r3 + 1, 3); s.put(r3 + 1, 4, g.zones.R.step, { align: 'center' });
+      s.put(r3 + 2, 1, 'Отметка нуля измерения глубин, м'); ws.mergeCells(r3 + 2, 1, r3 + 2, 3); s.put(r3 + 2, 4, g.surveyLevel, { fmt: F2, align: 'center' });
+      const dep = BCA.profile.depths(v).map(d => [d.st, d.h, d.i === BCA.profile.idx(g).iL ? 'Левая бровка' : d.i === BCA.profile.idx(g).iR ? 'Правая бровка' : '']);
       const eD = s.table(r3 + 4, 1, ['Створ', 'Глубина', 'Комментарий'], dep.map(r => [r[0], r[1], r[2]]), [undefined, F2]);
-      s.put(r3, 5, 'Записи из истории наблюдений за высоким уровнем воды', { bold: true }); ws.mergeCells(r3, 5, r3, 10);
-      s.put(r3 + 1, 5, 'Отметка уровня нижней межени (УНМ), м'); ws.mergeCells(r3 + 1, 5, r3 + 1, 9); s.put(r3 + 1, 10, h.unm, { fmt: F2 });
+      s.put(r3, 6, 'Записи из истории наблюдений за высоким уровнем воды', { bold: true }); ws.mergeCells(r3, 6, r3, 10);
+      s.put(r3 + 1, 6, 'Отметка уровня нижней межени (УНМ), м'); ws.mergeCells(r3 + 1, 6, r3 + 1, 9); s.put(r3 + 1, 10, h.unm, { fmt: F2 });
       if (sv.viuExcess != null) {
-        s.put(r3 + 2, 5, `Высокий исторический уровень (ВИУ) — выше отметки «${h.viu.refName}» на, м`, { wrap: true }); ws.mergeCells(r3 + 2, 5, r3 + 2, 9); ws.getRow(r3 + 2).height = 30; s.put(r3 + 2, 10, sv.viuExcess, { fmt: F2 });
-        s.put(r3 + 3, 5, `Отметка «${h.viu.refName}», м`, { wrap: true }); ws.mergeCells(r3 + 3, 5, r3 + 3, 9); ws.getRow(r3 + 3).height = 30; s.put(r3 + 3, 10, h.viu.refZ, { fmt: F2 });
+        s.put(r3 + 2, 6, `Высокий исторический уровень (ВИУ) — выше отметки «${h.viu.refName}» на, м`, { wrap: true }); ws.mergeCells(r3 + 2, 6, r3 + 2, 9); ws.getRow(r3 + 2).height = 30; s.put(r3 + 2, 10, sv.viuExcess, { fmt: F2 });
+        s.put(r3 + 3, 6, `Отметка «${h.viu.refName}», м`, { wrap: true }); ws.mergeCells(r3 + 3, 6, r3 + 3, 9); ws.getRow(r3 + 3).height = 30; s.put(r3 + 3, 10, h.viu.refZ, { fmt: F2 });
       }
-      s.put(r3 + 4, 5, 'Год наблюдения ВИУ'); ws.mergeCells(r3 + 4, 5, r3 + 4, 9); s.put(r3 + 4, 10, h.viu.year);
+      s.put(r3 + 4, 6, 'Год наблюдения ВИУ'); ws.mergeCells(r3 + 4, 6, r3 + 4, 9); s.put(r3 + 4, 10, h.viu.year);
       const ann = BCA.hydrology.annualTable(v), half = Math.ceil(ann.length / 2);
-      s.put(r3 + 6, 5, 'История наблюдений за последние годы', { bold: true, box: true, align: 'center' }); ws.mergeCells(r3 + 6, 5, r3 + 6, 8);
+      s.put(r3 + 6, 6, 'История наблюдений за последние годы', { bold: true, box: true, align: 'center' }); ws.mergeCells(r3 + 6, 6, r3 + 6, 9);
       const annRows = U.range(half, k => [ann[k].year, ann[k].P, ann[k + half]?.year ?? '', ann[k + half]?.P ?? '']);
-      const eA = s.table(r3 + 7, 5, ['Год', 'Превышение', 'Год', 'Превышение'], annRows, [undefined, F2, undefined, F2]);
-      s.put(eA, 5, 'Отметка нуля водомерного поста, м'); ws.mergeCells(eA, 5, eA, 7); s.put(eA, 8, BCA.hydrology.postZero(v), { fmt: F2 });
+      const eA = s.table(r3 + 7, 6, ['Год', 'Превышение', 'Год', 'Превышение'], annRows, [undefined, F2, undefined, F2]);
+      s.put(eA, 6, 'Отметка нуля водомерного поста, м'); ws.mergeCells(eA, 6, eA, 8); s.put(eA, 9, BCA.hydrology.postZero(v), { fmt: F2 });
       let rr = eA + 1;
-      if (h.post.offsetKm) { s.put(rr, 5, `Водомерный пост расположен на ${Math.abs(h.post.offsetKm)} км ${h.post.offsetKm > 0 ? 'ниже' : 'выше'} по течению от оси перехода`, { italic: true }); rr++; }
+      if (h.post.offsetKm) { s.put(rr, 6, `Водомерный пост расположен на ${Math.abs(h.post.offsetKm)} км ${h.post.offsetKm > 0 ? 'ниже' : 'выше'} по течению от оси перехода`, { italic: true }); rr++; }
       s.r = Math.max(eD, rr) + 1;
 
       s.put(s.r, 1, 'Записи из истории наблюдений за уровнем воды в период навигации', { bold: true }); s.r++;
@@ -169,17 +166,17 @@
       s.put(s.r, 3, `Максимальная отметка уровня воды при условии возможности прекращения навигации на t суток${h.rsuConsecutive ? ' подряд' : ''}`, { align: 'center', wrap: true });
       ws.mergeCells(s.r, 3, s.r, 2 + h.rsuT.length); ws.getRow(s.r).height = 30;
       s.r = s.table(s.r + 1, 1, ['Год', 'Длительность навигации за год (суток)'].concat(h.rsuT.map(t => 't = ' + t)),
-        rsu.map(r => [r.year, r.navDays].concat(h.rsuT.map(t => r.values[t]))), [undefined, undefined].concat(h.rsuT.map(() => F2))) + 1;
+        rsu.map(r => [r.year, r.navDays].concat(h.rsuT.map(t => r.values[t]))), [undefined, undefined].concat(h.rsuT.map(() => F2)), { headH: 58 }) + 1;
 
       s.put(s.r, 1, 'Дополнительные гидрологические сведения', { bold: true }); s.r++;
       if (h.slope.studentMode === 'twoLevels' && sv.slopeTask) {
         s.put(s.r, 1, `Отметки уреза воды на дату изысканий: выше по течению — ${U.fmt(sv.slopeTask.zUp)} м, ниже по течению — ${U.fmt(sv.slopeTask.zDown)} м; расстояние между точками ${sv.slopeTask.Lkm} км (ось перехода посередине).`, { wrap: true });
         ws.mergeCells(s.r, 1, s.r, 10); ws.getRow(s.r).height = 30; s.r++;
-      } else { s.put(s.r, 1, 'Продольный уклон реки'); s.put(s.r, 2, h.slope.i, { fmt: '0.00000' }); s.r++; }
+      } else { s.put(s.r, 1, 'Продольный уклон реки'); ws.mergeCells(s.r, 1, s.r, 3); s.put(s.r, 4, h.slope.i, { fmt: '0.00000', align: 'center' }); s.r++; }
       s.put(s.r, 1, 'Ландшафтные характеристики'); s.r++;
-      s.r = s.table(s.r, 1, ['Участок', 'Характеристика'], [['Левая пойма', h.morph.LP.text], ['Русло', h.morph.R.text], ['Правая пойма', h.morph.PP.text]], [], { textCol: 1 });
-      for (let k = 1; k <= 3; k++) { ws.mergeCells(s.r - k, 2, s.r - k, 10); ws.getRow(s.r - k).height = 32; }
-      ws.mergeCells(s.r - 4, 2, s.r - 4, 10);
+      const lr = s.r;
+      s.r = s.table(s.r, 1, ['Участок', '', 'Характеристика'].concat(U.range(7, () => '')), [['Левая пойма', '', h.morph.LP.text], ['Русло', '', h.morph.R.text], ['Правая пойма', '', h.morph.PP.text]].map(r => r.concat(U.range(7, () => ''))), [], { textCol: 2, headH: 16 });
+      for (let r = lr; r < s.r; r++) { ws.mergeCells(r, 1, r, 2); ws.mergeCells(r, 3, r, 10); if (r > lr) ws.getRow(r).height = 32; }
       s.gap();
       s.put(s.r, 1, 'Метеорологические сведения', { bold: true }); s.r++;
       s.kv('Расчетная скорость ветра, м/с', h.wind.v, { vcol: 4, fmt: F2 }); s.kv('Длина разгона ветровой волны, км', h.wind.fetch, { vcol: 4, fmt: F2 });
@@ -209,12 +206,10 @@
       const inp = (label, val, fmt) => { s.put(s.r, 1, label); const c = s.put(s.r, 2, val, { fmt, box: true, fill: 'FFDDEBF7' }); s.r++; return c.address; };
       const frm = (label, f, res, fmt) => { s.put(s.r, 1, label); const c = s.put(s.r, 2, { formula: f, result: res }, { fmt, box: true }); s.r++; return c.address; };
       s.put(s.r, 1, 'Геометрия профиля', { bold: true }); s.r++;
-      const w = BCA.profile.widths(g);
-      const aSL = inp('Шаг нивелировки левой поймы, м', g.stepLP), aNL = inp('Интервалов на левой пойме', w.nLP);
-      const aSR = inp('Шаг промера русла, м', g.stepR), aNR = inp('Интервалов в русле', w.nR);
-      const aSP = inp('Шаг нивелировки правой поймы, м', g.stepPP), aNP = inp('Интервалов на правой пойме', w.nPP);
-      const aWL = frm('Ширина левой поймы, м', `${aSL}*${aNL}`, w.LP), aWR = frm('Ширина русла, м', `${aSR}*${aNR}`, w.R), aWP = frm('Ширина правой поймы, м', `${aSP}*${aNP}`, w.PP);
-      frm('Общая длина профиля, м', `${aWL}+${aWR}+${aWP}`, w.total); frm('Число створов', `${aNL}+${aNR}+${aNP}+1`, N);
+      const aW = [];
+      BCA.profile.ZONES.forEach(k => { const z = g.zones[k], aS = inp(`${BCA.profile.ZONE_NAME[k]}: шаг, м`, z.step), aN = inp(`${BCA.profile.ZONE_NAME[k]}: интервалов`, z.n);
+        aW.push([frm(`${BCA.profile.ZONE_NAME[k]}: ширина, м`, `${aS}*${aN}`, z.step * z.n), aN]); });
+      frm('Общая длина профиля, м', aW.map(a => a[0]).join('+'), BCA.profile.widths(g).total); frm('Число створов', aW.map(a => a[1]).join('+') + '+1', N);
       s.gap(); s.put(s.r, 1, 'Уровни', { bold: true }); s.r++;
       const z0 = BCA.hydrology.postZero(v), aZ0 = inp('Отметка нуля водомерного поста, м', z0, F2);
       if (sv.viuExcess != null) { const aRef = inp('Отметка объекта для ВИУ, м', h.viu.refZ, F2), aEx = inp('Превышение ВИУ над объектом, м', sv.viuExcess, F2); frm('ВИУ, м', `${aRef}+${aEx}`, h.viu.z, F2); }
@@ -254,41 +249,7 @@
       ws.getCell(1, h.series.length + 3).value = 'Зелёным — период навигации. Уровни в створе перехода, м.';
     }
 
-    /* ---------- 6. Столбец старой книги ---------- */
-    if (o.legacy && N === 71) {
-      const ws = wb.addWorksheet('Столбец книги (71)');
-      ws.columns = [{ width: 10 }, { width: 70 }, { width: 16 }];
-      const R = X.legacyRows(v);
-      ws.getCell(1, 1).value = 'Строка'; ws.getCell(1, 2).value = 'Содержание'; ws.getCell(1, 3).value = 'Значение';
-      ws.getCell(2, 2).value = `Вставлять в столбец ${colName(6 + (m.variantNo || 0))} листа «Исходные данные по вариантам» (столбец = 6 + № варианта). Строки без значений не трогать.`;
-      let r = 3; Object.keys(R).map(Number).sort((a, b) => a - b).forEach(k => { ws.getCell(r, 1).value = k; ws.getCell(r, 2).value = R[k][0]; ws.getCell(r, 3).value = R[k][1]; r++; });
-    }
     return wb;
-  };
-
-  /* Строки столбца варианта старой книги (см. спецификацию: D5…D138, блоки ИГУ по 75 строк с D140). */
-  X.legacyRows = v => {
-    const m = v.meta, g = v.geodesy, h = v.hydro, R = {};
-    const set = (r, label, val) => { R[r] = [label, val]; };
-    set(5, 'Номер варианта', m.variantNo); set(6, 'Студент', m.student); set(7, 'Расчётная вероятность', v.tz.prob);
-    set(9, 'Шаг нивелировки пойм lп, м', g.stepLP); set(10, 'Шаг промера русла lр, м', g.stepR); set(11, 'Ноль измерения глубин, м', g.surveyLevel);
-    for (let i = 0; i <= 30; i++) set(13 + i, `Левая пойма, створ ${i + 1}`, g.z[i]);
-    for (let i = 30; i <= 40; i++) set(45 + i - 30, `Русло, створ ${i + 1}`, g.z[i]);
-    for (let i = 40; i <= 70; i++) set(57 + i - 40, `Правая пойма, створ ${i + 1}`, g.z[i]);
-    set(90, 'УНМ', h.unm); set(91, 'ВИУ', h.viu.z); set(92, 'Год ВИУ', h.viu.year); set(93, 'Нуль водомерного поста', BCA.hydrology.postZero(v));
-    BCA.hydrology.annualTable(v).slice(0, 21).forEach((a, j) => set(95 + j, `Превышение ${a.year}`, a.P));
-    set(118, 'Уклон', h.slope.i); set(119, 'Ландшафт ЛП', h.morph.LP.text); set(120, 'm ЛП', h.morph.LP.m); set(121, 'Ландшафт Р', h.morph.R.text); set(122, 'm Р', h.morph.R.m);
-    set(123, 'Ландшафт ПП', h.morph.PP.text); set(124, 'm ПП', h.morph.PP.m); set(125, 'Уклон (повтор)', h.slope.i);
-    set(127, 'Скорость ветра', h.wind.v); set(128, 'Длина разгона', h.wind.fetch); set(131, 'Класс судоходства', v.tz.navClass);
-    set(134, 'Категория дороги', v.tz.roadCategory); set(135, 'Полосы', v.tz.lanes); set(136, 'Отметка ПЧ, створ 1', v.tz.zRoadStart); set(137, 'Отметка ПЧ, конец', v.tz.zRoadEnd); set(138, 'Ответственность', v.tz.importance);
-    for (let b = 0; b < 9; b++) {
-      const base = 140 + 75 * b, l = v.geology.layers[b], so = l && BCA.SOILS.find(q => q.code === l.code);
-      set(base, `ИГУ блок ${b + 1}: код грунта`, l ? l.code : ''); set(base + 1, `ИГУ блок ${b + 1}: №`, l ? l.no : '');
-      set(base + 2, `ИГУ блок ${b + 1}: описание`, so ? [so.name, so.sub, so.ch1, so.ch2].filter(Boolean).join('. ') : '');
-      set(base + 3, `ИГУ блок ${b + 1}: vmax`, so ? Math.max(...so.v) : '');
-      for (let k = 0; k < 71; k++) set(base + 4 + k, `ИГУ блок ${b + 1}: кровля, створ ${k + 1}`, l && l.tops[k] != null ? l.tops[k] : 0);
-    }
-    return R;
   };
 
   X.toCSV = (head, rows, sep = ';') => {

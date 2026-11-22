@@ -13,6 +13,8 @@
    3. Уровни Z(t) получаются из Q(t) по кривой Q(Z) расчётного створа (hydraulics.js),
       поэтому ряды согласованы с профилем, шероховатостью и уклоном варианта.
    4. Опционально — заторные подъёмы уровня при вскрытии (гл. 2.4 пособия).
+   Ряд можно задать и извне таблицей (годовые максимумы и навигационные уровни без суточных значений):
+   тогда series[j].daily отсутствует, а уровни для РСУ берутся из series[j].rsuPost.
    Таблица для РСУ: максимальный уровень за навигацию при условии, что навигация может быть
    прекращена на t суток (наивысшие t суток исключаются; подряд или в сумме — настраивается). */
 (function (root) {
@@ -33,9 +35,10 @@
   Hy.postZero = v => v.hydro.post.zero != null ? v.hydro.post.zero : U.r2(Hy.toPost(v, v.hydro.unm) - 2);
 
   /* Значения по умолчанию, зависящие от профиля. */
+  /* Уровни по умолчанию: между бровками русла и подошвами берегов (берега не затапливаются). */
   Hy.autoLevels = v => {
-    const g = v.geodesy, zBank = Math.min(g.z[g.iL], g.z[g.iR]), zTop = Math.min(g.z[0], g.z[g.z.length - 1]), d = zTop - zBank;
-    return { zBank, zTop, zLo: U.r2(zBank + 0.08 * d), zHi: U.r2(zBank + 0.55 * d), viu: U.r2(zBank + 0.65 * d) };
+    const g = v.geodesy, I = BCA.profile.idx(g), zBrow = Math.min(g.z[I.iL], g.z[I.iR]), zFoot = Math.min(g.z[I.bl], g.z[I.br]), d = zFoot - zBrow;
+    return { zBrow, zFoot, zLo: U.r2(zBrow + 0.08 * d), zHi: U.r2(zBrow + 0.6 * d), viu: U.r2(zBrow + 0.75 * d) };
   };
 
   /* Форма внутригодового хода расхода (максимум = 1) + сутки вскрытия. */
@@ -116,7 +119,7 @@
     }
     h.series = series;
     h.seriesStamp = Hy.stamp(v);
-    if (h.viu.z == null || h.viu.auto) { h.viu.auto = true; h.viu.z = U.r2(Math.max(auto.viu, Math.max(...series.map(s => s.zMax)) + rng.uniform(0.3, 0.8))); }
+    if (h.viu.z == null || h.viu.auto) { h.viu.auto = true; h.viu.z = U.r2(Math.min(auto.zFoot - 0.1, Math.max(auto.viu, Math.max(...series.map(s => s.zMax)) + rng.uniform(0.3, 0.8)))); }
     if (h.viu.year == null) h.viu.year = h.post.firstYear - rng.int(20, 60);
     if (h.viu.refZ == null) h.viu.refZ = U.r2(h.viu.z - rng.uniform(0.8, 2.5));
     return series;
@@ -130,9 +133,11 @@
   Hy.rsuTable = v => {
     const h = v.hydro;
     return (h.series || []).map(s => {
-      const lev = s.daily.slice(s.navStart, s.navStart + s.navDays);
       const row = { year: s.year, navDays: s.navDays, navStart: s.navStart, values: {} };
-      h.rsuT.forEach(t => { const val = Hy.rsuValue(lev, t, h.rsuConsecutive); row.values[t] = val == null ? null : Hy.toPost(v, val); });
+      if (s.daily) {
+        const lev = s.daily.slice(s.navStart, s.navStart + s.navDays);
+        h.rsuT.forEach(t => { const val = Hy.rsuValue(lev, t, h.rsuConsecutive); row.values[t] = val == null ? null : Hy.toPost(v, val); });
+      } else h.rsuT.forEach(t => { row.values[t] = s.rsuPost?.[t] ?? null; });   // ряд задан таблицей извне, без суточных уровней
       return row;
     });
   };
@@ -151,7 +156,7 @@
   /* «Отпечаток» исходных данных рядов: если профиль, шероховатость, уклон или режим изменились
      после генерации, ряды устарели (интерфейс предлагает перегенерировать). */
   Hy.stamp = v => {
-    const h = v.hydro, s = JSON.stringify([v.geodesy.z, v.geodesy.iL, v.geodesy.iR, v.geodesy.stepLP, v.geodesy.stepR, v.geodesy.stepPP, Hy.mByZone(v), h.slope.i, h.unm, h.regime, h.post.nYears, h.post.firstYear, v.meta.seed]);
+    const h = v.hydro, s = JSON.stringify([v.geodesy.z, v.geodesy.zones, Hy.mByZone(v), h.slope.i, h.unm, h.regime, h.post.nYears, h.post.firstYear, v.meta.seed]);
     let x = 2166136261; for (let k = 0; k < s.length; k++) { x ^= s.charCodeAt(k); x = Math.imul(x, 16777619); }
     return (x >>> 0).toString(36);
   };

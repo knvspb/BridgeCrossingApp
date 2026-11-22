@@ -8,29 +8,24 @@
 </head>
 <body>
 <header class="app">
-  <div>
-    <h1>Генератор задания · «Проект мостового перехода»</h1>
-    <div class="sub" id="hdrSub"></div>
-  </div>
+  <div><h1>Генератор задания</h1><div class="sub" id="hdrSub"></div></div>
   <div class="sp"></div>
-  <button id="btnUndo" title="Ctrl+Z">↶ Отменить</button>
-  <button id="btnAutofill" title="Сгенерировать всё, что не заполнено преподавателем">Заполнить пустое</button>
-  <button id="btnRegen" title="Новый вариант: профиль, грунты и ряды уровней по новому зерну">🎲 Новый вариант</button>
-  <button id="btnOpen">Открыть…</button>
-  <button id="btnSave">Сохранить JSON</button>
-  <button id="btnXlsx" class="primary">Excel</button>
-  <input type="file" id="fileOpen" accept=".json,application/json" class="hide">
+  <button id="btnUndo" title="Отменить (Ctrl+Z)">↶</button>
+  <button id="btnRegen" title="Новый вариант по новому зерну">🎲 Новый</button>
+  <button id="btnOpen" title="Вариант JSON или книга данных Excel (.xlsx)">Открыть</button>
+  <button id="btnSave" title="Сохранить вариант в JSON">Сохранить</button>
+  <button id="btnXlsx" class="primary" title="Бланк задания в Excel">Excel</button>
+  <input type="file" id="fileOpen" accept=".json,.xlsx,application/json" class="hide">
 </header>
 <nav class="tabs" id="tabs"></nav>
 <main>
   <section id="tab-task"></section>
-  <section id="tab-geodesy" class="hide"></section>
-  <section id="tab-geology" class="hide"></section>
+  <section id="tab-relief" class="hide"></section>
+  <section id="tab-soil" class="hide"></section>
   <section id="tab-hydro" class="hide"></section>
   <section id="tab-topo" class="hide"></section>
-  <section id="tab-check" class="hide"></section>
-  <section id="tab-blank" class="hide"></section>
-  <section id="tab-templates" class="hide"></section>
+  <section id="tab-out" class="hide"></section>
+  <section id="tab-tpl" class="hide"></section>
 </main>
 <div class="toast" id="toast"></div>
 
@@ -44,6 +39,7 @@
 <script src="../../core/topo.js"></script>
 <script src="../../core/schema.js"></script>
 <script src="../../core/export.js"></script>
+<script src="../../core/dataio.js"></script>
 <script src="../../core/charts.js"></script>
 <script src="generator.js"></script>
 </body>

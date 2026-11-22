@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/knvspb/BridgeCrossingApp/schema/variant.schema.json",
+  "title": "Вариант задания «Проект мостового перехода»",
+  "description": "Исходные данные учебного варианта. Единицы — СИ (м, м/с, км где указано), отметки — абсолютные, м. Для загрузки достаточно schemaVersion и geodesy.zones: всё отсутствующее программа сгенерирует (BCA.dataio.fromPartial).",
+  "type": "object",
+  "required": ["schemaVersion"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "meta": {
+      "type": "object", "description": "Сведения о задании",
+      "properties": {
+        "code": { "type": "string", "description": "Шифр варианта" },
+        "seed": { "type": "integer", "description": "Зерно генераторов: одно зерно — один и тот же вариант" },
+        "student": { "type": "string" }, "group": { "type": "string" }, "course": { "type": ["integer", "null"] }, "semester": { "type": "string" },
+        "discipline": { "type": "string" }, "dirCode": { "type": "string" }, "department": { "type": "string" }, "teacher": { "type": "string" },
+        "issueDate": { "type": "string", "description": "ДД.ММ.ГГГГ" }, "year": { "type": ["integer", "null"] },
+        "deadlines": { "type": "array", "items": { "type": "string" } },
+        "goal": { "type": "string" }, "tasks": { "type": "string" }
+      }
+    },
+    "tz": {
+      "type": "object", "description": "Техническое задание",
+      "properties": {
+        "prob": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1, "description": "Расчётная вероятность превышения, доля (0,01 = 1 %)" },
+        "roadCategory": { "enum": ["IА", "IБ", "IВ", "II", "III", "IV", "V"] },
+        "lanes": { "type": "integer", "minimum": 1 },
+        "navClass": { "type": "string", "description": "Класс реки по судоходству: «несудоходная» или 1…7" },
+        "importance": { "enum": [1, 2], "description": "1 — нормальный, 2 — повышенный уровень ответственности" },
+        "region": { "type": "string" }, "addInfo": { "type": "string" },
+        "road": {
+          "type": "array", "description": "Характерные точки оси проезжей части на берегах (только створы зон BL и BR)",
+          "items": { "type": "object", "required": ["st", "z"], "properties": { "st": { "type": "integer", "minimum": 1, "description": "№ створа" }, "z": { "type": "number" }, "label": { "type": "string" } } }
+        }
+      }
+    },
+    "geodesy": {
+      "type": "object", "description": "Профиль по оси перехода",
+      "required": ["zones"],
+      "properties": {
+        "zones": {
+          "type": "object", "description": "Зоны слева направо: BL — левый берег (не затапливается), LP — левая пойма, R — русло, PP — правая пойма, BR — правый берег. Створов = Σn + 1; граничный створ общий для соседних зон.",
+          "required": ["BL", "LP", "R", "PP", "BR"],
+          "properties": { "BL": { "$ref": "#/$defs/zone" }, "LP": { "$ref": "#/$defs/zone" }, "R": { "$ref": "#/$defs/zone" }, "PP": { "$ref": "#/$defs/zone" }, "BR": { "$ref": "#/$defs/zone" } }
+        },
+        "z": { "type": "array", "items": { "type": "number" }, "description": "Отметки земли (в русле — дна) по всем створам слева направо; длина Σn + 1. Нет — профиль генерируется." },
+        "surveyLevel": { "type": "number", "description": "Уровень воды на дату изысканий = ноль измерения глубин; студент получает глубины русла от него" },
+        "comments": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Комментарии к створам: ключ — индекс створа с 0" }
+      }
+    },
+    "hydro": {
+      "type": "object", "description": "Гидрометеорология. Все уровни в series — на оси перехода.",
+      "properties": {
+        "unm": { "type": "number", "description": "Уровень нижней межени, м (точность 0,1)" },
+        "post": { "type": "object", "properties": {
+          "name": { "type": "string" },
+          "zero": { "type": ["number", "null"], "description": "Отметка нуля поста; null — УНМ − 2 м (в месте поста)" },
+          "offsetKm": { "type": "number", "description": "Удаление поста от оси, км; > 0 — ниже по течению (уровни поста ниже на i·L)" },
+          "nYears": { "type": "integer", "minimum": 3 }, "firstYear": { "type": "integer" } } },
+        "viu": { "type": "object", "properties": {
+          "z": { "type": ["number", "null"], "description": "Отметка ВИУ на оси; null — сгенерировать" },
+          "year": { "type": ["integer", "null"] },
+          "refName": { "type": "string", "description": "Известный объект; студент получает превышение ВИУ над ним" },
+          "refZ": { "type": ["number", "null"] } } },
+        "slope": { "type": "object", "properties": {
+          "i": { "type": "number", "exclusiveMinimum": 0 },
+          "studentMode": { "enum": ["value", "twoLevels"], "description": "value — уклон числом; twoLevels — два уреза на расстоянии Lkm" },
+          "Lkm": { "type": ["number", "null"] } } },
+        "morph": { "type": "object", "description": "Ландшафт и шероховатость m = 1/n по участкам", "properties": {
+          "LP": { "$ref": "#/$defs/morph" }, "R": { "$ref": "#/$defs/morph" }, "PP": { "$ref": "#/$defs/morph" } } },
+        "regime": { "type": "object", "description": "Параметры генерации рядов", "properties": {
+          "feed": { "enum": ["snow", "rain", "glacier", "mixed"] }, "landscape": { "enum": ["plain", "foothill", "mountain"] },
+          "iceJams": { "type": "boolean" }, "zLo": { "type": ["number", "null"], "description": "min годового УВВ за историю" }, "zHi": { "type": ["number", "null"], "description": "max годового УВВ за историю" },
+          "Cv": { "type": "number" }, "CsCv": { "type": "number" }, "navMean": { "type": "number" }, "navSd": { "type": "number" } } },
+        "rsuT": { "type": "array", "items": { "type": "integer", "minimum": 0 }, "description": "t, сут — столбцы таблицы для РСУ" },
+        "rsuConsecutive": { "type": "boolean", "description": "true — исключаются t суток подряд, false — t наивысших суток в сумме" },
+        "wind": { "type": "object", "properties": { "v": { "type": "number", "description": "м/с" }, "fetch": { "type": "number", "description": "км" } } },
+        "series": {
+          "type": "array", "description": "Ряд наблюдений. Нет — генерируется. Можно задать без суточных уровней: тогда нужны zMax, navDays и rsuPost.",
+          "items": { "type": "object", "required": ["year", "zMax"], "properties": {
+            "year": { "type": "integer" }, "zMax": { "type": "number", "description": "Годовой максимум уровня на оси, м" },
+            "navStart": { "type": "integer", "description": "Сутки начала навигации (0 — 1 января)" }, "navDays": { "type": "integer" },
+            "daily": { "type": "array", "items": { "type": "number" }, "minItems": 365, "maxItems": 365, "description": "Суточные уровни на оси" },
+            "rsuPost": { "type": "object", "additionalProperties": { "type": ["number", "null"] }, "description": "Если нет daily: уровни на посту при прекращении навигации на t суток, ключ — t" },
+            "jam": { "type": "boolean" } } }
+        }
+      }
+    },
+    "geology": {
+      "type": "object",
+      "properties": {
+        "ubv": { "type": "number", "description": "Условный низ нижнего ИГУ, м" },
+        "layers": { "type": "array", "items": { "type": "object", "required": ["code"], "properties": {
+          "no": { "type": "string", "description": "Номер ИГУ" },
+          "code": { "type": "integer", "minimum": 1, "maximum": 44, "description": "Код грунта по справочнику неразмывающих скоростей (core/soils.js)" },
+          "tops": { "type": "array", "items": { "type": ["number", "null"] }, "description": "Отметки кровли по створам; null — слоя нет. Нет массива — генерируется." },
+          "gen": { "type": "object", "properties": { "order": { "type": "number" }, "t": { "type": "number" }, "var": { "type": "number" }, "lens": { "type": "boolean" }, "from": { "type": "integer" }, "to": { "type": "integer" } } } } } }
+      }
+    },
+    "topo": { "type": "object", "properties": { "radius": { "type": "number", "description": "Радиус кривизны реки в плане, м; 0 — прямая, > 0 — влево" }, "gridStep": { "type": "number" }, "size": { "type": ["number", "null"] }, "amp": { "type": "number" }, "seed": { "type": "integer" } } },
+    "gen": { "type": "object", "description": "Параметры генератора профиля (служебные)" },
+    "library": { "type": "object", "description": "Справочник шероховатости (служебный)" }
+  },
+  "$defs": {
+    "zone": { "type": "object", "required": ["step", "n"], "properties": { "step": { "type": "number", "exclusiveMinimum": 0, "description": "Шаг, м" }, "n": { "type": "integer", "minimum": 1, "description": "Число интервалов (для русла ≥ 2)" } } },
+    "morph": { "type": "object", "properties": { "id": { "type": "string" }, "text": { "type": "string" }, "m": { "type": ["number", "null"] } } }
+  }
+}
