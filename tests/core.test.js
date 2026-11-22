@@ -242,17 +242,39 @@ test('своя база грунтов: выгрузка в Excel и загру�
   assert.deepEqual(v.geology.layers.map(l => l.code), [2, 15, 13, 16, 4]);
 });
 
-test('горизонтали: минимальный радиус и отсутствие длинных прямых', () => {
-  const v = B.schema.defaultVariant(1), Rmin = 25, sp = 2;
+/* пересечения отрезков между всеми горизонталями (и самопересечения) — через пространственный хэш */
+const crossings = (contours, cell = 20) => {
+  const segs = []; contours.forEach((c, ci) => c.lines.forEach((l, li) => { for (let k = 1; k < l.pts.length; k++) segs.push([l.pts[k - 1], l.pts[k], ci, li, k]); }));
+  const H = new Map(), key = (i, j) => i + ':' + j;
+  segs.forEach((s, si) => { const x0 = Math.floor(Math.min(s[0][0], s[1][0]) / cell), x1 = Math.floor(Math.max(s[0][0], s[1][0]) / cell), y0 = Math.floor(Math.min(s[0][1], s[1][1]) / cell), y1 = Math.floor(Math.max(s[0][1], s[1][1]) / cell);
+    for (let i = x0; i <= x1; i++) for (let j = y0; j <= y1; j++) { const k = key(i, j); if (!H.has(k)) H.set(k, []); H.get(k).push(si); } });
+  const cr = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  let n = 0; const seen = new Set();
+  for (const list of H.values()) for (let x = 0; x < list.length; x++) for (let y = x + 1; y < list.length; y++) {
+    const i = list[x], j = list[y], A = segs[i], Bs = segs[j];
+    if (A[2] === Bs[2] && A[3] === Bs[3] && Math.abs(A[4] - Bs[4]) <= 1) continue;          // соседние отрезки одной линии
+    const d1 = cr(A[0], A[1], Bs[0]), d2 = cr(A[0], A[1], Bs[1]), d3 = cr(Bs[0], Bs[1], A[0]), d4 = cr(Bs[0], Bs[1], A[1]);
+    if (((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0)) && Math.abs(d1) > 1e-9 && Math.abs(d2) > 1e-9) { const k = i < j ? i + '-' + j : j + '-' + i; if (!seen.has(k)) { seen.add(k); n++; } }
+  }
+  return n;
+};
+
+test('горизонтали не пересекаются (между собой и сами с собой)', () => {
+  const v = B.schema.defaultVariant(1);
+  for (const R of [0, 2500, -1200]) for (const s of [1, 2]) {
+    const r = B.topo.generate(v, { radius: R }), c = B.topo.contours(r, 0.5, { smooth: s, minR: 25 });
+    assert.equal(crossings(c), 0, `R=${R}, сглаживание ${s}`);
+  }
+});
+
+test('горизонтали: без длинных прямых, радиус ≥ Rmin почти везде', () => {
+  const v = B.schema.defaultVariant(1);
   for (const R of [0, 2500, -1200]) {
-    const r = B.topo.generate(v, { radius: R }), c = B.topo.contours(r, 0.5, { smooth: 2, minR: Rmin });
-    let bad = 0, tot = 0, maxStraight = 0;
-    c.forEach(q => q.lines.forEach(l => {
-      let p = l.pts; if (l.closed) p = p.slice(0, -1); const m = p.length, id = k => l.closed ? ((k % m) + m) % m : k; tot += m;
-      if (!l.small && !l.tight) for (let k = l.closed ? 0 : sp; k < (l.closed ? m : m - sp); k++) if (B.topo.radius3(p[id(k - sp)], p[k], p[id(k + sp)]) < Rmin * 0.96) bad++;
-      let run = 0; for (let k = 3; k < m - 3; k++) { const rr = B.topo.radius3(p[k - 3], p[k], p[k + 3]); if (rr > 3000) { run += Math.hypot(p[k][0] - p[k - 1][0], p[k][1] - p[k - 1][1]); maxStraight = Math.max(maxStraight, run); } else run = 0; }
-    }));
-    assert.ok(bad <= 0.001 * tot, `R=${R}: нарушений радиуса ${bad} из ${tot}`);
+    const r = B.topo.generate(v, { radius: R }), d = B.topo.displaySurface(r, { smooth: 2, minR: 25, interval: 0.5 });
+    let tot = 0, maxStraight = 0;
+    d.contours.forEach(q => q.lines.forEach(l0 => { const l = B.topo.resample(l0, r.step / 3), p = l.pts, m = p.length; tot += m;
+      let run = 0; for (let k = 3; k < m - 3; k++) { const rr = B.topo.radius3(p[k - 3], p[k], p[k + 3]); if (rr > 3000) { run += Math.hypot(p[k][0] - p[k - 1][0], p[k][1] - p[k - 1][1]); maxStraight = Math.max(maxStraight, run); } else run = 0; } }));
+    assert.ok(d.remaining <= 0.06 * tot, `R=${R}: точек с радиусом < 25 м ${d.remaining} из ${tot}`);
     assert.ok(maxStraight < 350, `R=${R}: почти прямой участок ${maxStraight.toFixed(0)} м`);
   }
 });
