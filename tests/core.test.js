@@ -324,3 +324,33 @@ test('топоплан: старицы на изображении не прер
     }
   }
 });
+
+test('топоплан: режимы узких форм и сходы горизонталей', () => {
+  const v = B.schema.defaultVariant(1), r = B.topo.generate(v, { radius: -1200 });
+  const o = { smooth: 2, minR: 25, interval: 0.5 }, D = (narrow, sharpTips) => B.topo.displaySurface(r, Object.assign({ narrow, sharpTips }, o));
+  const small = d => d.contours.reduce((s, c) => s + c.lines.filter(l => l.closed && B.topo.lineLength(l) < 2 * Math.PI * 25).length, 0);
+  const g = D('generalize', false), k = D('keep', false), s = D('soft', false), gt = D('generalize', true);
+  assert.equal(small(g), 0, 'генерализация снимает мелкие замкнутые горизонтали');
+  assert.ok(g.dropped > 0 && k.dropped === 0, 'сохранение не снимает горизонтали');
+  assert.equal(s.Rt, 12.5); assert.ok(s.remaining < k.remaining, 'мягкий радиус: меньше нарушений');
+  assert.ok(gt.tips > 0 && g.tips === 0, 'сходы горизонталей учитываются только при sharpTips');
+  assert.ok(gt.smoothedNodes < g.smoothedNodes, 'на сходах сглаживание не усиливается');
+  assert.ok(gt.remaining <= 0.03 * gt.contours.reduce((a, c) => a + c.lines.reduce((b, l) => b + B.topo.lineLength(l), 0), 0) / (r.step / 3));
+  // режим из варианта (v.topo.narrow) доходит до поверхности
+  assert.equal(B.topo.displaySurface(B.topo.generate(Object.assign({}, v, { topo: Object.assign({}, v.topo, { narrow: 'soft' }) }), { radius: -1200 }), o).mode, 'soft');
+});
+
+test('выгрузка сглаженной поверхности: CSV в узлах сетки и на уплотнённой сетке, горизонтали лежат на ней', () => {
+  const v = B.schema.defaultVariant(1), r = B.topo.generate(v, { radius: 2500 }), o = { smooth: 2, minR: 25, interval: 0.5 };
+  const raw = B.topo.surfacePoints(r), sm = B.topo.surfacePoints(r, Object.assign({ surface: 'smooth' }, o)), fi = B.topo.surfacePoints(r, Object.assign({ surface: 'fine' }, o));
+  assert.equal(sm.length, raw.length); assert.equal(fi.length, ((r.n - 1) * 3 + 1) ** 2);
+  sm.forEach((p, k) => { assert.ok(Math.abs(p[0] - raw[k][0]) < 0.01 && Math.abs(p[1] - raw[k][1]) < 0.01); });
+  assert.ok(sm.some((p, k) => Math.abs(p[2] - raw[k][2]) > 0.05), 'сглаженная отличается от исходной');
+  // точки горизонталей лежат на сглаженной поверхности (билинейно по уплотнённой сетке)
+  const nf = (r.n - 1) * 3 + 1, st = r.step / 3, z = (x, y) => { const fx = x / st, fy = (y + r.L / 2) / st, i = Math.min(nf - 2, Math.floor(fx)), j = Math.min(nf - 2, Math.floor(fy)), a = fx - i, b = fy - j, Z = (ii, jj) => fi[jj * nf + ii][2];
+    return (Z(i, j) * (1 - a) + Z(i + 1, j) * a) * (1 - b) + (Z(i, j + 1) * (1 - a) + Z(i + 1, j + 1) * a) * b; };
+  let worst = 0; B.topo.contours(r, 0.5, o).forEach(c => c.lines.forEach(l => l.pts.forEach(p => { worst = Math.max(worst, Math.abs(z(p[0], p[1]) - c.level)); })));
+  assert.ok(worst < 0.01, `горизонтали отходят от выгруженной поверхности на ${worst.toFixed(3)} м`);
+  const csv = B.topo.toCSV(r, ';', true, Object.assign({ surface: 'smooth' }, o)).split('\r\n');
+  assert.equal(csv.length, raw.length + 1); assert.match(csv[1], /^\d+(,\d+)?;-?\d+(,\d+)?;\d+(,\d+)?$/);
+});

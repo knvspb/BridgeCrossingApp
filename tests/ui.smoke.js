@@ -4,7 +4,7 @@ const { chromium } = require('playwright');
 const path = require('path');
 (async () => {
   const b = await chromium.launch(); const p = await (await b.newContext({ viewport: { width: 1400, height: 900 } })).newPage(); const errs = [];
-  p.on('pageerror', e => errs.push(e.message)); p.on('console', m => { if (m.type() === 'error') errs.push(m.text()); }); p.on('dialog', d => d.accept());
+  p.on('pageerror', e => errs.push(e.message + ' @ ' + (e.stack || '').split('\n').slice(0, 3).join(' | '))); p.on('console', m => { if (m.type() === 'error') errs.push(m.text()); }); p.on('dialog', d => d.accept());
   await p.goto('file://' + path.join(__dirname, '..', 'apps', 'generator', 'index.html')); await p.evaluate(() => localStorage.clear()); await p.reload(); await p.waitForTimeout(600);
   const n = await p.$$eval('nav.tabs button', bs => bs.length);
   for (let k = 1; k <= n; k++) {

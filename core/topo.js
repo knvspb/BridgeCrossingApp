@@ -187,7 +187,7 @@
         pts.push([U.r2(X), U.r2(y), U.r2(z)]);
       }
     }
-    return { n, step, L, off, points: pts, axis, wl, chanHalf: hw, waterLevel: wl0, slope, valleySlope: iv, sinuosity: K, lakes: lakes.length, ravines: ravines.length };
+    return { n, step, L, off, narrow: t.narrow || 'generalize', sharpTips: t.sharpTips ?? true, points: pts, axis, wl, chanHalf: hw, waterLevel: wl0, slope, valleySlope: iv, sinuosity: K, lakes: lakes.length, ravines: ravines.length };
   };
 
   /* ---------- изолинии ---------- */
@@ -289,6 +289,7 @@
         локально усиливается (карта сглаживания: 4 ступени σ), горизонтали строятся заново — до 4 проходов;
      3) поверхность уплотняется в 3 раза кубическим B-сплайном (C²) — линии плавные без доводки. */
   T.SMOOTH_SIGMA = [0, 0.7, 1.5, 2.5];
+  T.NARROW_MODES = { generalize: 'генерализовать (снимать формы уже 2·Rmin)', keep: 'сохранять (скруглять до предела)', soft: 'сохранять, радиус Rmin/2' };
   T.FINE = 3;
   const blur = (src, n, sg) => {
     if (!(sg > 0)) return Float64Array.from(src);
@@ -320,13 +321,25 @@
     const out = [], sp = Math.max(1, Math.round(Rmin / 4 / ds));
     lines.forEach(l0 => { const l = T.resample(l0, ds); let p = l.pts; if (l.closed) p = p.slice(0, -1); const m = p.length; if (m < 2 * sp + 1) return;
       const id = k => l.closed ? ((k % m) + m) % m : k;
-      for (let k = l.closed ? 0 : sp; k < (l.closed ? m : m - sp); k++) if (T.radius3(p[id(k - sp)], p[k], p[id(k + sp)]) < Rmin) out.push(p[k]); });
+      const M = Math.max(2, Math.round(2 * Rmin / ds)), at = k => p[l.closed ? id(k) : U.clamp(k, 0, m - 1)];
+      for (let k = l.closed ? 0 : sp; k < (l.closed ? m : m - sp); k++) if (T.radius3(p[id(k - sp)], p[k], p[id(k + sp)]) < Rmin) {
+        /* сход горизонталей (конец «языка» на склоне): в ±2·Rmin по линии ветви идут обратно почти параллельно и рядом */
+        const a0 = at(k - M), a1 = at(k - M + 2), b0 = at(k + M - 2), b1 = at(k + M);
+        const ta = [a1[0] - a0[0], a1[1] - a0[1]], tb = [b1[0] - b0[0], b1[1] - b0[1]], cs = (ta[0] * tb[0] + ta[1] * tb[1]) / (Math.hypot(...ta) * Math.hypot(...tb) || 1);
+        const q = p[k].slice(); q.tip = cs < -0.85 && Math.hypot(a0[0] - b1[0], a0[1] - b1[1]) < 2.5 * Rmin; out.push(q); } });
     return out;
   };
   /* Поверхность для горизонталей (кэшируется в res по силе сглаживания, Rmin и шагу горизонталей). */
   T.displaySurface = (res, opt = {}) => {
     const level = U.clamp(Math.round(opt.smooth ?? 2), 0, 3), Rmin = opt.minR ?? T.MIN_RADIUS, interval = opt.interval || T.autoInterval(res);
-    const key = [level, Rmin, interval].join('|'); res._disp = res._disp || {}; if (res._disp[key]) return res._disp[key];
+    /* узкие формы (уже 2·Rmin), у которых горизонталь не может повернуть с радиусом Rmin:
+       keep — сохранять (скругляются до предела, мелкие замкнутые горизонтали остаются);
+       generalize — генерализация: мелкие замкнутые горизонтали (периметр < 2πRmin) снимаются, сглаживание усиливается сильнее;
+       soft — сохранять формы, допуская для них радиус Rmin/2 (не меньше 10 м). */
+    const mode = T.NARROW_MODES[opt.narrow ?? res.narrow] ? (opt.narrow ?? res.narrow) : 'generalize';
+    const sharp = opt.sharpTips ?? res.sharpTips ?? true, Rt = mode === 'soft' ? Math.max(10, Rmin / 2) : Rmin;
+    const loopMin = mode === 'keep' || !(Rmin > 0) ? 0 : 2 * Math.PI * Rt, passes = 7;
+    const key = [level, Rmin, interval, mode, sharp].join('|'); res._disp = res._disp || {}; if (res._disp[key]) return res._disp[key];
     const n = res.n, z0 = Float64Array.from(res.points, p => p[2]), s0 = T.SMOOTH_SIGMA[level];
     const sig = [s0, Math.max(s0 * 1.7, 2.5), Math.max(s0 * 2.6, 4), Math.max(s0 * 4, 6)];          // ступени σ (в узлах сетки)
     /* в русле — дополнительное сглаживание ВДОЛЬ ОСИ РУСЛА (окно σ ≈ 80 м, на том же смещении от оси):
@@ -340,7 +353,6 @@
           let s = 0, ws = 0; for (let j = -r; j <= r; j++) { const yy = y + j; if (yy < 0 || yy >= n) continue; s += w[j + r] * zAtRow(yy, res.axis[yy][0] + off); ws += w[j + r]; }
           z0[y * n + x] = src[y * n + x] * (1 - m) + (s / ws) * m; } }
     }
-    const lv = sig.map(s => blur(z0, n, s));
     const wmap = new Float64Array(n * n), F = T.FINE, nf = (n - 1) * F + 1, grid = fineGrid(res, nf), ds = res.step / 3;
     /* защищённые зоны: русло (полоса 1,3 полуширины вдоль оси русла) и полоса у оси дороги — только базовое сглаживание */
     const guard = new Float64Array(n * n), hwG = (res.chanHalf || 0) * 1.3 + res.step, yBand = Math.max(2 * res.step, 0.04 * res.L);
@@ -350,17 +362,35 @@
     /* водоёмы (старицы, озёра: дно ниже уреза > 0,2 м) тоже защищены — иначе усиленное сглаживание «замывает» узкую старицу и она рвётся */
     if (res.wl) { const wet = new Float64Array(n * n); for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) wet[j * n + i] = z0[j * n + i] < res.wl[j] - 0.2 ? 1 : 0;
       const wb = blur(wet, n, 1); for (let k = 0; k < n * n; k++) guard[k] = Math.min(guard[k], U.clamp(2 - wb[k] / 0.25, 0, 1)); }
+    /* генерализация узких форм: морфологическое открытие (снимает гряды и бугры уже 2·Rmin) и закрытие (ямы, озерки,
+       понижения уже 2·Rmin) по кругу радиуса Rmin; только вне защищённых зон (русло, ось дороги, водоёмы) */
+    if (mode === 'generalize' && Rmin > 0) {
+      const rr = Rmin / res.step, ri = Math.floor(rr), disk = [];
+      for (let dy = -ri; dy <= ri; dy++) for (let dx = -ri; dx <= ri; dx++) if (dx * dx + dy * dy <= rr * rr + 1e-9) disk.push([dx, dy]);
+      const morph = (a, mx) => { const o = new Float64Array(n * n);
+        for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) { let v = mx ? -Infinity : Infinity;
+          for (const [dx, dy] of disk) { const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= n || yy >= n) continue; const q = a[yy * n + xx]; v = mx ? Math.max(v, q) : Math.min(v, q); }
+          o[y * n + x] = v; } return o; };
+      const zo = morph(morph(z0, false), true), zm = blur(morph(morph(zo, true), false), n, Math.max(1, 0.5 * rr));   // открытие, затем закрытие; края площадок скругляются
+      const gB = blur(guard, n, 1);
+      for (let k = 0; k < n * n; k++) { const wlk = res.wl ? res.wl[Math.floor(k / n)] : -Infinity, w = gB[k] * smooth((z0[k] - wlk - 0.2) / 0.3);   // вода и полоса 0,2–0,5 м над урезом не трогаются
+        z0[k] = z0[k] * (1 - w) + zm[k] * w; }
+    }
+    const lv = sig.map(s => blur(z0, n, s));
     const free = (x, y) => { const i = Math.round(x / res.step), j = Math.round((y + res.L / 2) / res.step); return i >= 0 && j >= 0 && i < n && j < n && guard[j * n + i] > 0.5; };
     let zc, fine, levels, lines, tight = [];
-    for (let pass = 0; pass < 7; pass++) {
+    /* сходы горизонталей: на конце вытянутой формы на склоне (гряда, ложбина) горизонталь разворачивается «языком»;
+       при sharp такие развороты не добиваются до Rmin усиленным сглаживанием — остаются естественно острыми */
+    const steep = q => sharp && q.tip;
+    for (let pass = 0; pass < passes; pass++) {
       zc = new Float64Array(n * n);
       for (let k = 0; k < n * n; k++) { const w = U.clamp(wmap[k], 0, 3), a = Math.floor(w), b = Math.min(3, a + 1), t = w - a; zc[k] = lv[a][k] * (1 - t) + lv[b][k] * t; }
       fine = upsample(zc, n, F);
       levels = levelsOf(fine.z, interval);
-      /* генерализация: замкнутые горизонтали с периметром < 2πRmin (бугорки и западины < 2·Rmin) снимаются */
-      lines = levels.map(L => ({ level: L, lines: isoOn(grid, fine.z, L).filter(l => !(Rmin > 0 && l.closed && T.lineLength(l) < 2 * Math.PI * Rmin)) }));
-      if (!(Rmin > 0) || pass === 6) break;
-      tight = tightPoints(lines.flatMap(c => c.lines), Rmin, ds).filter(q => free(q[0], q[1]));
+      /* генерализация: замкнутые горизонтали с периметром < loopMin (бугорки и западины уже 2·Rt) снимаются */
+      lines = levels.map(L => ({ level: L, lines: isoOn(grid, fine.z, L).filter(l => !(loopMin > 0 && l.closed && T.lineLength(l) < loopMin)) }));
+      if (!(Rmin > 0) || pass === passes - 1) break;
+      tight = tightPoints(lines.flatMap(c => c.lines), Rt, ds).filter(q => free(q[0], q[1]) && !steep(q));
       if (!tight.length) break;
       const add = new Float64Array(n * n);
       tight.forEach(p => { const ix = Math.round(p[0] / res.step), iy = Math.round((p[1] + res.L / 2) / res.step);
@@ -368,10 +398,10 @@
       const addB = blur(add, n, 2.5); let mx = 0; for (const a of addB) mx = Math.max(mx, a);
       for (let k = 0; k < n * n; k++) wmap[k] = Math.min(3, wmap[k] + (mx > 0 ? addB[k] / mx : 0) * guard[k]);
     }
-    const allTight = Rmin > 0 ? tightPoints(lines.flatMap(c => c.lines), Rmin, ds) : [];
-    const remaining = allTight.filter(q => free(q[0], q[1])).length, inGuard = allTight.length - remaining;
-    const dropped = Rmin > 0 ? levels.reduce((s, L) => s + isoOn(grid, fine.z, L).filter(l => l.closed && T.lineLength(l) < 2 * Math.PI * Rmin).length, 0) : 0;
-    const out = { n, zc, fine, grid, contours: lines, interval, remaining, inGuard, dropped, smoothedNodes: wmap.reduce((s, w) => s + (w > 0.05 ? 1 : 0), 0) };
+    const allTight = Rmin > 0 ? tightPoints(lines.flatMap(c => c.lines), Rt, ds) : [], freeTight = allTight.filter(q => free(q[0], q[1]));
+    const steepN = freeTight.filter(steep).length, remaining = freeTight.length - steepN, inGuard = allTight.length - freeTight.length;
+    const dropped = loopMin > 0 ? levels.reduce((s, L) => s + isoOn(grid, fine.z, L).filter(l => l.closed && T.lineLength(l) < loopMin).length, 0) : 0;
+    const out = { n, zc, fine, grid, contours: lines, interval, mode, Rt, remaining, tips: steepN, inGuard, dropped, smoothedNodes: wmap.reduce((s, w) => s + (w > 0.05 ? 1 : 0), 0) };
     res._disp[key] = out; return out;
   };
   /* Горизонтали: [{ level, lines: [{ pts, closed }] }] — изолинии сглаженной поверхности (не пересекаются). */
@@ -394,9 +424,18 @@
   };
   T.wlAt = (res, Y) => U.interp(res.wl.map((_, k) => -res.L / 2 + k * res.step), res.wl, Y);
 
-  T.toCSV = (res, sep = ';', decimalComma = true) => {
+  /* Облако точек. opt.surface: 'raw' — исходная поверхность (по умолчанию); 'smooth' — сглаженная поверхность горизонталей
+     в узлах сетки; 'fine' — она же на уплотнённой сетке (шаг/3). Сглаженная — значения B-сплайна, по которому
+     строятся горизонтали плана и DXF (opt.smooth, opt.minR, opt.interval — как для горизонталей). */
+  T.surfacePoints = (res, opt = {}) => {
+    const s = opt.surface || 'raw'; if (s === 'raw') return res.points;
+    const d = T.displaySurface(res, opt), nf = d.fine.nf, F = T.FINE, st = res.step / F, k = s === 'fine' ? 1 : F, out = [];
+    for (let j = 0; j < nf; j += k) for (let i = 0; i < nf; i += k) out.push([U.r2(i * st), U.r2(-res.L / 2 + j * st), Math.round(d.fine.z[j * nf + i] * 1000) / 1000]);
+    return out;
+  };
+  T.toCSV = (res, sep = ';', decimalComma = true, opt = {}) => {
     const f = q => decimalComma ? String(q).replace('.', ',') : String(q);
-    return ['X' + sep + 'Y' + sep + 'Z'].concat(res.points.map(p => p.map(f).join(sep))).join('\r\n');
+    return ['X' + sep + 'Y' + sep + 'Z'].concat(T.surfacePoints(res, opt).map(p => p.map(f).join(sep))).join('\r\n');
   };
 
   /* ---------- DXF (AutoCAD R12, ASCII) ----------
