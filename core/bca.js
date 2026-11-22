@@ -75,12 +75,15 @@
   };
 
   /* Двумерный гладкий шум (value noise) на сетке nx × ny с периодом corr узлов. */
+  /* corr — число или [corrX, corrY] (анизотропный шум: вытянутые гряды). Аргументы функции — дробные индексы. */
   BCA.smoothNoise2D = function (rng, nx, ny, corr) {
-    const k = Math.max(1, corr), mx = Math.ceil(nx / k) + 2, my = Math.ceil(ny / k) + 2;
+    const kx = Math.max(1, Array.isArray(corr) ? corr[0] : corr), ky = Math.max(1, Array.isArray(corr) ? corr[1] : corr);
+    const mx = Math.ceil(nx / kx) + 3, my = Math.ceil(ny / ky) + 3;
     const g = U.range(my, () => U.range(mx, () => rng.next() * 2 - 1));
     const s = f => (1 - Math.cos(Math.PI * f)) / 2;
     return (ix, iy) => {
-      const tx = ix / k, ty = iy / k, jx = Math.floor(tx), jy = Math.floor(ty), fx = s(tx - jx), fy = s(ty - jy);
+      ix = U.clamp(ix, 0, nx); iy = U.clamp(iy, 0, ny);
+      const tx = ix / kx, ty = iy / ky, jx = Math.floor(tx), jy = Math.floor(ty), fx = s(tx - jx), fy = s(ty - jy);
       const a = g[jy][jx] * (1 - fx) + g[jy][jx + 1] * fx, b = g[jy + 1][jx] * (1 - fx) + g[jy + 1][jx + 1] * fx;
       return a * (1 - fy) + b * fy;
     };

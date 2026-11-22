@@ -152,3 +152,26 @@ test('книга данных Excel: выгрузка и загрузка без
   assert.deepEqual(B.hydrology.rsuTable(r.v).map(a => a.values), B.hydrology.rsuTable(v).map(a => a.values));
   assert.equal(r.v.hydro.viu.z, v.hydro.viu.z); assert.equal(r.v.tz.roadCategory, v.tz.roadCategory);
 });
+
+test('справочник грунтов: описание и расчётная категория', () => {
+  const SC = B.SOILCAT;
+  assert.equal(SC.describe({ type: 'loam-h', variety: 'silty', il: 'stiff', e: 'e3' }), 'Суглинок тяжёлый пылеватый, тугопластичный, e = 0,9–0,6');
+  assert.equal(SC.describe({ type: 'clay-l', il: 'soft' }), 'Глина лёгкая, мягкопластичная');
+  assert.equal(SC.describe({ type: 'pebble', filler: 'sand', sr: 'sat' }), 'Галечниковый грунт с песчаным заполнителем, насыщенный водой');
+  assert.equal(SC.autoCode({ type: 'clay-h', e: 'e2' }), 3);              // плотные (Кп 0,6–0,3)
+  assert.equal(SC.autoCode({ type: 'loess', e: 'e1' }), 11);
+  assert.equal(SC.autoCode({ type: 'sand-m' }), 16);
+  SC.TYPES.forEach(t => t.codes.forEach(c => assert.ok(B.SOILS.find(s => s.code === c), `${t.id}: нет кода ${c}`)));
+  for (let c = 1; c <= 44; c++) assert.ok(SC.TYPES.some(t => t.codes.includes(c)), `код ${c} не покрыт справочником`);
+  const il = SC.propOptions('il', SC.type('sandy-loam')).map(o => o[0]);
+  assert.deepEqual(il, ['', 'solid', 'plastic', 'fluid']);                // консистенция супеси — три класса
+});
+
+test('топоповерхность: естественный рельеф добавляет формы, но не трогает ось', () => {
+  const v = B.schema.defaultVariant(1);
+  const a = B.topo.generate(v, { radius: 2500 }), b = B.topo.generate(v, { radius: 2500, natural: false });
+  assert.ok(a.oxbows + a.ravines > 0);
+  let diff = 0; a.points.forEach((p, k) => { diff = Math.max(diff, Math.abs(p[2] - b.points[k][2])); });
+  assert.ok(diff > 1);
+  const c = B.topo.contours(a, 0.5); assert.ok(c.length > 10 && c.every(q => q.segs.length > 0));
+});

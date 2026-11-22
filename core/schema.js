@@ -17,11 +17,11 @@
   const EX_PP = [123, 124.2, 124, 123, 123, 120.4, 121, 121.5, 122, 123, 124, 124.3, 124.3, 125.5, 126, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 130, 130, 131, 131, 131];
 
   S.defaultLayers = () => [
-    { no: '1', code: 2,  tops: [], gen: { order: 1, t: 2.5, var: 0.4, lens: false, from: 1, to: 999 } },
-    { no: '2', code: 19, tops: [], gen: { order: 2, t: 3.0, var: 0.4, lens: false, from: 1, to: 999 } },
-    { no: '3', code: 14, tops: [], gen: { order: 3, t: 2.0, var: 0.3, lens: true, from: 8, to: 30 } },
-    { no: '4', code: 23, tops: [], gen: { order: 4, t: 3.0, var: 0.3, lens: false, from: 1, to: 999 } },
-    { no: '5', code: 4,  tops: [], gen: { order: 5, t: 4.0, var: 0.3, lens: false, from: 1, to: 999 } }
+    { no: '1', code: 2,  desc: { type: 'loam-h', variety: 'silty', il: 'stiff', e: 'e3' }, tops: [], gen: { order: 1, t: 2.5, var: 0.4, lens: false, from: 1, to: 999 } },
+    { no: '2', code: 19, desc: { type: 'sand-c', density: 'medium', sr: 'sat' }, tops: [], gen: { order: 2, t: 3.0, var: 0.4, lens: false, from: 1, to: 999 } },
+    { no: '3', code: 14, desc: { type: 'sand-f', density: 'loose', sr: 'sat' }, tops: [], gen: { order: 3, t: 2.0, var: 0.3, lens: true, from: 8, to: 30 } },
+    { no: '4', code: 23, desc: { type: 'gravel', filler: 'sand', sr: 'sat' }, tops: [], gen: { order: 4, t: 3.0, var: 0.3, lens: false, from: 1, to: 999 } },
+    { no: '5', code: 4,  desc: { type: 'clay-l', il: 'semisolid', e: 'e1' }, tops: [], gen: { order: 5, t: 4.0, var: 0.3, lens: false, from: 1, to: 999 } }
   ];
 
   S.defaultVariant = (seed) => {
@@ -83,6 +83,7 @@
     if (!Array.isArray(o.geodesy.z) || o.geodesy.z.length !== N) throw new Error(`geodesy.z: ожидается ${N} отметок (сумма интервалов зон + 1), получено ${o.geodesy.z?.length ?? 0}`);
     const d = S.defaultVariant(o.meta?.seed ?? 1);
     const fill = (dst, src) => { for (const k in src) { if (dst[k] === undefined) dst[k] = src[k]; else if (src[k] && typeof src[k] === 'object' && !Array.isArray(src[k]) && dst[k] && typeof dst[k] === 'object' && !Array.isArray(dst[k])) fill(dst[k], src[k]); } };
+    if (o.geology && Array.isArray(o.geology.layers)) o.geology.layers.forEach(l => { if (!l.desc || !l.desc.type) l.desc = BCA.SOILCAT.fromCode(l.code); });
     if (o.geology && Array.isArray(o.geology.layers)) o.geology.layers.forEach((l, k) => { l.gen = Object.assign({ order: k + 1, t: 3, var: 0.3, lens: false, from: 1, to: N }, l.gen || {}); if (!Array.isArray(l.tops) || l.tops.length !== N) l.tops = new Array(N).fill(null); });
     fill(o, d);
     return o;
@@ -154,7 +155,10 @@
     ['LP', 'R', 'PP'].forEach(k => { const r = v.library.roughness.find(q => q.id === h.morph[k].id); if (r && !r.verified) push('warn', 'Гидрология', `m для «${r.text.slice(0, 50)}…» не сверен.`); });
     const geo = v.geology;
     if (!geo.layers.length) push('err', 'Геология', 'Не задано ни одного ИГУ.');
-    geo.layers.forEach(l => { if (!BCA.SOILS.find(s => s.code === l.code)) push('err', 'Геология', `ИГУ ${l.no}: нет грунта с кодом ${l.code}.`); if (l.tops.every(t => t == null)) push('warn', 'Геология', `ИГУ ${l.no} не встречается.`); });
+    geo.layers.forEach(l => { const t = l.desc && BCA.SOILCAT.type(l.desc.type);
+      if (!t) push('warn', 'Геология', `ИГУ ${l.no}: нет описания грунта по справочнику.`);
+      else if (!t.codes.includes(l.code)) push('warn', 'Геология', `ИГУ ${l.no}: расчётная категория ${l.code} не соответствует описанию «${t.name}».`);
+      if (!BCA.SOILS.find(s => s.code === l.code)) push('err', 'Геология', `ИГУ ${l.no}: нет грунта с кодом ${l.code}.`); if (l.tops.every(t => t == null)) push('warn', 'Геология', `ИГУ ${l.no} не встречается.`); });
     let bad = 0; for (let i = 0; i < N; i++) { const tops = geo.layers.map(l => l.tops[i]).filter(t => t != null); if (!tops.length || Math.abs(Math.max(...tops) - g.z[i]) > 0.05) bad++; }
     if (bad) push('warn', 'Геология', `На ${bad} створах кровля верхнего слоя не совпадает с поверхностью.`);
     if (geo.layers.some(l => l.tops.some(t => t != null && t <= geo.ubv))) push('err', 'Геология', `Есть кровли ниже условного низа ${geo.ubv} м.`);

@@ -39,6 +39,7 @@
   ];
   /* Пустое значение этих параметров означает «вычислить/сгенерировать»; для остальных — «по умолчанию». */
   D.NULLABLE = ['hydro.post.zero', 'hydro.viu.z', 'hydro.viu.year', 'hydro.viu.refZ', 'hydro.regime.zLo', 'hydro.regime.zHi', 'hydro.slope.Lkm'];
+  D.DESC_KEYS = ['type', 'variety', 'filler', 'density', 'il', 'sr', 'e', 'strength', 'extra'];
   const getP = (o, path) => path.split('.').reduce((a, k) => a == null ? a : a[k], o);
   const setP = (o, path, val) => { const ks = path.split('.'), last = ks.pop(); const t = ks.reduce((a, k) => (a[k] = a[k] ?? {}), o); t[last] = val; };
   const fmtVal = (v, type) => v == null ? '' : type === 'b' ? (v ? 'да' : 'нет') : type === 'l' ? v.join(', ') : v;
@@ -54,7 +55,7 @@
 
   /* ---------- книга данных ---------- */
   D.SHEETS = {
-    params: 'Параметры', zones: 'Зоны', profile: 'Профиль', road: 'Дорога', years: 'Годы', layers: 'ИГУ', tops: 'Кровли', readme: 'Описание'
+    params: 'Параметры', zones: 'Зоны', profile: 'Профиль', road: 'Дорога', years: 'Годы', layers: 'ИГУ', tops: 'Кровли', soilref: 'Справочник грунтов', readme: 'Описание'
   };
   D.buildDataWorkbook = (ExcelJS, v) => {
     const wb = new ExcelJS.Workbook(), S = D.SHEETS, g = v.geodesy, I = BCA.profile.idx(g);
@@ -68,7 +69,7 @@
       ['Профиль — отметки по всем створам подряд (длина = число створов). Пусто — профиль генерируется.'],
       ['Дорога — отметки оси проезжей части в характерных точках; только створы берегов.'],
       ['Годы — годовые максимумы: превышение П над нулём водомерного поста; навигация и уровни при прекращении навигации на t суток (отметки на посту, столбцы «t=…»). Пусто — ряды генерируются.'],
-      ['ИГУ — слои: код грунта из справочника (1…44) и параметры генератора. Кровли — отметки кровли по створам (пусто — слоя нет; лист пуст — генерировать).'],
+      ['ИГУ — слои: описание по справочнику (столбцы desc.*, значения — на листе «Справочник грунтов»), код категории неразмывающих скоростей (1…44; пусто — по описанию) и параметры генератора. Кровли — отметки кровли по створам (пусто — слоя нет; лист пуст — генерировать).'],
       ['Формат JSON того же варианта описан в schema/variant.schema.json и docs/VARIANT_FORMAT.md.']
     ], [140]);
     sheet(S.params, ['Параметр', 'Значение', 'Ед.', 'Ключ'], D.PARAMS.map(([path, label, unit, type]) => [label, fmtVal(getP(v, path), type), unit, path]), [52, 40, 16, 26]);
@@ -78,8 +79,12 @@
     const ann = BCA.hydrology.annualTable(v), rsu = BCA.hydrology.rsuTable(v), h = v.hydro;
     sheet(S.years, ['Год', 'Превышение П, м', 'Навигация, сут'].concat(h.rsuT.map(t => 't=' + t)),
       ann.map((a, j) => [a.year, a.P, rsu[j]?.navDays ?? ''].concat(h.rsuT.map(t => rsu[j]?.values[t] ?? ''))), [8, 14, 14]);
-    sheet(S.layers, ['№ ИГУ', 'Код грунта', 'Грунт (справочно)', 'Залегание (1 — верхний)', 'Мощность, м', 'Изменчивость', 'Линза: от створа', 'Линза: до створа'],
-      v.geology.layers.map((l, k) => { const s = BCA.SOILS.find(q => q.code === l.code); return [l.no, l.code, s ? s.name + (s.sub ? ', ' + s.sub : '') : '', l.gen.order ?? k + 1, l.gen.t, l.gen.var, l.gen.lens ? l.gen.from : '', l.gen.lens ? l.gen.to : '']; }), [8, 10, 40, 12, 12, 12, 12, 12]);
+    const DK = D.DESC_KEYS;
+    sheet(S.layers, ['№ ИГУ', 'Код категории vнр', 'Описание (справочно)', 'Залегание (1 — верхний)', 'Мощность, м', 'Изменчивость', 'Линза: от створа', 'Линза: до створа'].concat(DK.map(k => 'desc.' + k)),
+      v.geology.layers.map((l, k) => [l.no, l.code, BCA.SOILCAT.layerText(l), l.gen.order ?? k + 1, l.gen.t, l.gen.var, l.gen.lens ? l.gen.from : '', l.gen.lens ? l.gen.to : ''].concat(DK.map(q => l.desc?.[q] ?? ''))), [8, 10, 50, 12, 12, 12, 12, 12]);
+    sheet(S.soilref, ['Поле', 'Значение', 'Наименование'], [].concat(
+      BCA.SOILCAT.TYPES.map(t => ['desc.type', t.id, `${t.name} (${BCA.SOILCAT.GROUPS[t.group].name}); категории vнр: ${t.codes.join(', ')}`]),
+      ...Object.entries(BCA.SOILCAT.PROPS).map(([p, q]) => q.opts.filter(o => o[0]).map(o => ['desc.' + p, o[0], Array.isArray(o[1]) ? o[1][0] : o[1]]))), [14, 14, 80]);
     sheet(S.tops, ['Створ'].concat(v.geology.layers.map(l => 'ИГУ ' + l.no)), g.z.map((_, i) => [i + 1].concat(v.geology.layers.map(l => l.tops[i] ?? ''))), [8]);
     return wb;
   };
@@ -103,7 +108,8 @@
       if (tCols.length) partial.hydro.rsuT = tCols.map(q => q[1]);
     }
     const lr = sheetRows(ws(S.layers));
-    if (lr.length) { partial.geology = partial.geology || {}; partial.geology.layers = lr.map((r, k) => ({ no: String(r[0] ?? k + 1), code: Math.round(U.num(r[1])), tops: [],
+    if (lr.length) { partial.geology = partial.geology || {}; partial.geology.layers = lr.map((r, k) => ({ no: String(r[0] ?? k + 1), code: U.num(r[1]) != null ? Math.round(U.num(r[1])) : null,
+      desc: Object.fromEntries(D.DESC_KEYS.map((q, j) => [q, r[8 + j] == null ? '' : String(r[8 + j])]).filter(q => q[1] !== '')), tops: [],
       gen: { order: U.num(r[3]) ?? k + 1, t: U.num(r[4]) ?? 3, var: U.num(r[5]) ?? 0.3, lens: U.num(r[6]) != null, from: U.num(r[6]) ?? 1, to: U.num(r[7]) ?? 999 } })); }
     const tr = sheetRows(ws(S.tops));
     if (tr.length && partial.geology?.layers && tr.some(r => r.slice(1).some(q => U.num(q) != null))) partial.geology.layers.forEach((l, k) => { l.tops = tr.map(r => U.num(r[k + 1])); });
@@ -125,6 +131,7 @@
     const N = BCA.profile.idx(v.geodesy).N;
     if (!hasZ) { if (zonesGiven || v.geodesy.z.length !== N) { v.geodesy.z = new Array(N).fill(0); BCA.profile.generate(v); notes.push('профиль'); } }
     else if (v.geodesy.z.length !== N) throw new Error(`Профиль: ${v.geodesy.z.length} отметок, а по зонам нужно ${N}`);
+    v.geology.layers.forEach(l => { if (!l.desc || !l.desc.type) l.desc = BCA.SOILCAT.fromCode(l.code ?? 2); if (l.code == null) { l.code = BCA.SOILCAT.autoCode(l.desc); notes.push('категории грунтов'); } });
     v.geology.layers.forEach((l, k) => { l.gen = Object.assign({ order: k + 1, t: 3, var: 0.3, lens: false, from: 1, to: 999 }, l.gen || {}); if (!Array.isArray(l.tops) || l.tops.length !== N) l.tops = new Array(N).fill(null); });
     if (!hasTops) { BCA.profile.generateSoil(v); notes.push('грунты'); }
     if (zonesGiven && !o.tz?.road) v.tz.road = [];                                     // точки по умолчанию не подходят к другим зонам

@@ -102,3 +102,76 @@
     add(C.el('text', { x: sx(s.dMax) + 6, y: sy(s.zMax) - 6, 'font-size': 11, fill: '#1f2328' }, `${s.year}: max ${U.fmt(s.zMax)}${s.jam ? ' (затор)' : ''}`));
   };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* План топоповерхности: полутоновая заливка по высоте с лёгкой отмывкой, вода, горизонтали, ось дороги. */
+(function (root) {
+  'use strict';
+  const BCA = root.BCA, U = BCA.util, C = BCA.charts;
+  C.topoPlan = (cv, res, opt = {}) => {
+    const S = cv.width, M = 34, A = S - 2 * M, n = res.n, L = res.L, P = res.points, ctx = cv.getContext('2d');
+    const px = X => M + X / L * A, py = Y => M + (Y + L / 2) / L * A;          // верх — выше по течению
+    const zs = P.map(p => p[2]), lo = Math.min(...zs), hi = Math.max(...zs), wl = opt.waterLevel ?? res.waterLevel;
+    const interval = opt.interval || BCA.topo.autoInterval(res), index = interval * 5;
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, S, S);
+    /* заливка: билинейная интерполяция z по пикселям */
+    const img = ctx.createImageData(A, A), D = img.data, zAt = (gx, gy) => P[gy * n + gx][2];
+    for (let j = 0; j < A; j++) {
+      const fy = j / (A - 1) * (n - 1), gy = Math.min(n - 2, Math.floor(fy)), ty = fy - gy;
+      for (let i = 0; i < A; i++) {
+        const fx = i / (A - 1) * (n - 1), gx = Math.min(n - 2, Math.floor(fx)), tx = fx - gx;
+        const z00 = zAt(gx, gy), z10 = zAt(gx + 1, gy), z01 = zAt(gx, gy + 1), z11 = zAt(gx + 1, gy + 1);
+        const z = (z00 * (1 - tx) + z10 * tx) * (1 - ty) + (z01 * (1 - tx) + z11 * tx) * ty;
+        const sx = (z10 - z00) * (1 - ty) + (z11 - z01) * ty, sy = (z01 - z00) * (1 - tx) + (z11 - z10) * tx;
+        const shade = U.clamp(-(sx + sy) * 9, -14, 14);                            // свет с северо-запада
+        let r, g, b;
+        if (z < wl) { const d = U.clamp((wl - z) / 4, 0, 1); r = 214 - 40 * d; g = 232 - 30 * d; b = 246 - 12 * d; }
+        else { const k = (z - wl) / Math.max(1, hi - wl); const v = 247 - 48 * Math.pow(k, 0.8); r = g = b = v; r += 2; b -= 3; }
+        const o = (j * A + i) * 4; D[o] = r + shade; D[o + 1] = g + shade; D[o + 2] = b + shade; D[o + 3] = 255;
+      }
+    }
+    ctx.putImageData(img, M, M);
+    /* горизонтали */
+    const cs = BCA.topo.contours(res, interval);
+    const isIdx = l => Math.abs(l / index - Math.round(l / index)) < 1e-6;
+    ctx.lineCap = 'round';
+    cs.forEach(c => {
+      const idx = isIdx(c.level);
+      ctx.strokeStyle = idx ? 'rgba(120,78,40,0.85)' : 'rgba(140,96,58,0.55)'; ctx.lineWidth = idx ? 1.3 : 0.6;
+      ctx.beginPath(); c.segs.forEach(s => { ctx.moveTo(px(s[0]), py(s[1])); ctx.lineTo(px(s[2]), py(s[3])); }); ctx.stroke();
+    });
+    /* урез воды */
+    BCA.topo.contours(res, 1e9, wl).forEach(c => { ctx.strokeStyle = '#3a7fc0'; ctx.lineWidth = 1.1; ctx.beginPath(); c.segs.forEach(s => { ctx.moveTo(px(s[0]), py(s[1])); ctx.lineTo(px(s[2]), py(s[3])); }); ctx.stroke(); });
+    /* подписи утолщённых горизонталей */
+    const placed = [];
+    ctx.font = '11px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    cs.filter(c => isIdx(c.level)).forEach(c => {
+      for (let k = 0; k < c.segs.length; k += 7) {
+        const s = c.segs[k], mx = px((s[0] + s[2]) / 2), my = py((s[1] + s[3]) / 2);
+        if (mx < M + 20 || mx > S - M - 20 || my < M + 12 || my > S - M - 12 || Math.abs(my - py(0)) < 14) continue;
+        if (placed.some(q => Math.hypot(q[0] - mx, q[1] - my) < 150)) continue;
+        placed.push([mx, my]);
+        let ang = Math.atan2(py(s[3]) - py(s[1]), px(s[2]) - px(s[0])); if (ang > Math.PI / 2) ang -= Math.PI; if (ang < -Math.PI / 2) ang += Math.PI;
+        ctx.save(); ctx.translate(mx, my); ctx.rotate(ang); const txt = String(+c.level.toFixed(2)).replace('.', ',');
+        ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.strokeText(txt, 0, 0); ctx.fillStyle = '#6b4423'; ctx.fillText(txt, 0, 0); ctx.restore();
+      }
+    });
+    /* ось дороги */
+    ctx.setLineDash([10, 4, 2, 4]); ctx.strokeStyle = '#7b3fa0'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(M, py(0)); ctx.lineTo(S - M, py(0)); ctx.stroke(); ctx.setLineDash([]);
+    ctx.textAlign = 'left'; ctx.fillStyle = '#7b3fa0'; ctx.font = '12px sans-serif'; ctx.fillText('ось дороги', M + 6, py(0) - 9);
+    /* стрелка течения по оси русла */
+    if (res.axis && res.axis.length > 4) {
+      const a = res.axis[Math.round(res.axis.length * 0.16)], b = res.axis[Math.round(res.axis.length * 0.26)];
+      const x1 = px(a[0]), y1 = py(a[1]), x2 = px(b[0]), y2 = py(b[1]), an = Math.atan2(y2 - y1, x2 - x1);
+      ctx.strokeStyle = '#1d4f86'; ctx.fillStyle = '#1d4f86'; ctx.lineWidth = 1.8; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x2, y2); ctx.lineTo(x2 - 10 * Math.cos(an - 0.4), y2 - 10 * Math.sin(an - 0.4)); ctx.lineTo(x2 - 10 * Math.cos(an + 0.4), y2 - 10 * Math.sin(an + 0.4)); ctx.closePath(); ctx.fill();
+    }
+    /* рамка, масштаб, легенда */
+    ctx.strokeStyle = '#333'; ctx.lineWidth = 1; ctx.strokeRect(M, M, A, A);
+    const nice = [50, 100, 200, 250, 500, 1000].find(q => q / L * A > 90) || 1000, bx = M, by = S - 12, bw = nice / L * A;
+    ctx.fillStyle = '#333'; ctx.fillRect(bx, by - 4, bw / 2, 4); ctx.strokeRect(bx, by - 4, bw, 4);
+    ctx.font = '11px sans-serif'; ctx.textAlign = 'left'; ctx.fillText(`${nice} м`, bx + bw + 6, by - 1);
+    ctx.textAlign = 'right'; ctx.fillText(`Горизонтали через ${String(interval).replace('.', ',')} м, утолщённые — через ${String(index).replace('.', ',')} м`, S - M, by - 1);
+    ctx.textAlign = 'left'; ctx.fillText('↓ течение', S - M - 70, M - 12);
+    return { interval };
+  };
+})(typeof globalThis !== 'undefined' ? globalThis : this);

@@ -73,7 +73,7 @@
     const draw = () => {
       view = C.profile(svg, V, { mode });
       legend.innerHTML = '';
-      V.geology.layers.forEach((l, k) => { const s = B.SOILS.find(q => q.code === l.code); legend.appendChild(h('span', {}, h('i', { style: `background:${C.LAYER_COLORS[k % C.LAYER_COLORS.length]}` }), `ИГУ ${l.no}: ${s ? s.name + (s.sub ? ', ' + s.sub.toLowerCase() : '') : '?'}`)); });
+      V.geology.layers.forEach((l, k) => legend.appendChild(h('span', {}, h('i', { style: `background:${C.LAYER_COLORS[k % C.LAYER_COLORS.length]}` }), `ИГУ ${l.no}: ${B.SOILCAT.layerText(l)}`)));
     };
     const bar = !modes.length ? null : h('div', { class: 'row' }, modes.map(([label, kind, layer]) => h('button', { class: mode.kind === kind && (kind === 'ground' || mode.layer === layer) ? 'on' : '', title: 'Зажмите кнопку мыши и ведите по разрезу', onclick: () => { mode = { kind, layer }; renderTab(); } }, label)));
     let drag = null;
@@ -135,29 +135,49 @@
 
   /* ---------- 4. Грунты ---------- */
   function renderSoil() {
-    const box = pane('soil'), geo = V.geology, L = geo.layers, N = V.geodesy.z.length;
+    const box = pane('soil'), geo = V.geology, L = geo.layers, N = V.geodesy.z.length, SC = B.SOILCAT;
     if (!(mode.kind !== 'ground' && L[mode.layer])) mode = L.length ? { kind: 'top', layer: 0 } : { kind: 'ground', layer: 0 };
-    const soilSel = l => { const s = h('select', { style: 'width:100%;min-width:220px' }); B.SOILS.forEach(o => s.appendChild(h('option', { value: o.code, selected: o.code === l.code }, `${o.code}. ${o.name}${o.sub ? ' — ' + o.sub : ''}${o.ch1 ? ' (' + o.ch1 + ')' : ''}`))); s.onchange = () => change(() => l.code = Number(s.value)); return s; };
-    const vTitle = l => { const s = B.SOILS.find(q => q.code === l.code); return s ? 'vнр при h = 0,4/1/2/3/5/10 м: ' + s.v.join(' / ') + ' м/с' : ''; };
-    const rows = L.map((l, k) => h('tr', {},
-      h('td', { class: 'nowrap' }, h('span', { class: 'sw', style: `background:${C.LAYER_COLORS[k % C.LAYER_COLORS.length]}` }), ' ', txt(() => l.no, q => l.no = q)),
-      h('td', { title: vTitle(l) }, soilSel(l)),
-      h('td', {}, num(() => l.gen.order ?? k + 1, q => l.gen.order = q ?? k + 1, { step: 1, w: 48, title: 'Порядок залегания: 1 — верхний' })),
-      h('td', {}, num(() => l.gen.t, q => l.gen.t = q ?? 0, { step: 0.5, w: 58, title: 'Мощность, м' })),
-      h('td', {}, num(() => l.gen.var, q => l.gen.var = U.clamp(q ?? 0, 0, 1.5), { step: 0.1, w: 52, title: 'Изменчивость мощности 0…1' })),
-      h('td', { class: 'nowrap' }, chk(() => l.gen.lens, q => l.gen.lens = q, '', 'Линза между створами'), num(() => l.gen.from, q => l.gen.from = U.clamp(q ?? 1, 1, N), { step: 1, w: 52 }), '–', num(() => Math.min(l.gen.to, N), q => l.gen.to = U.clamp(q ?? N, 1, N), { step: 1, w: 52 })),
-      h('td', { class: 'nowrap' }, btn('↑', () => change(() => { [L[k - 1], L[k]] = [L[k], L[k - 1]]; })), btn('↓', () => change(() => { [L[k + 1], L[k]] = [L[k], L[k + 1]]; })), btn('✕', () => change(() => L.splice(k, 1))))));
-    rows.forEach((r, k) => { const b = r.lastChild.querySelectorAll('button'); b[0].disabled = k === 0; b[1].disabled = k === L.length - 1; });
+    /* тип грунта: список с группами (несвязные, связные, особые, скальные) */
+    const typeSel = l => {
+      const s = h('select', { title: 'Тип грунта по классификации ГОСТ 25100' });
+      Object.entries(SC.GROUPS).forEach(([gk, gq]) => s.appendChild(h('optgroup', { label: gq.name }, SC.TYPES.filter(t => t.group === gk).map(t => h('option', { value: t.id, selected: l.desc?.type === t.id, title: t.note }, t.name)))));
+      s.onchange = () => change(() => { const keep = l.desc?.extra; l.desc = { type: s.value }; if (keep) l.desc.extra = keep; l.code = SC.autoCode(l.desc); });
+      return s;
+    };
+    const propSel = (l, p, t) => { const s = h('select', { title: SC.PROPS[p].name });
+      SC.propOptions(p, t).forEach(([v, w]) => s.appendChild(h('option', { value: v, selected: (l.desc[p] || '') === v }, v ? (Array.isArray(w) ? w[t.g] : w) : SC.PROPS[p].name + ': —')));
+      s.onchange = () => change(() => { l.desc[p] = s.value; if (p === 'e') l.code = SC.autoCode(l.desc); }); return s; };
+    const codeSel = (l, t) => { const s = h('select', { title: 'Расчётная категория по таблице неразмывающих скоростей' });
+      (t ? t.codes : B.SOILS.map(q => q.code)).forEach(c => { const q = B.SOILS.find(z => z.code === c); s.appendChild(h('option', { value: c, selected: c === l.code }, `${c}. ${q.sub || q.name}${q.ch1 ? ' (' + q.ch1 + ')' : ''}`)); });
+      s.onchange = () => change(() => l.code = Number(s.value)); return s; };
+    const blocks = L.map((l, k) => {
+      if (!l.desc || !l.desc.type) l.desc = SC.fromCode(l.code);
+      const t = SC.type(l.desc.type), q = B.SOILS.find(z => z.code === l.code);
+      const ok = t && t.codes.includes(l.code);
+      const head = h('div', { class: 'row' },
+        h('span', { class: 'sw', style: `background:${C.LAYER_COLORS[k % C.LAYER_COLORS.length]}` }), h('b', {}, 'ИГУ'), h('span', { style: 'width:52px;display:inline-block' }, txt(() => l.no, x => l.no = x)),
+        typeSel(l), h('span', { class: 'sp' }),
+        btn('↑', () => change(() => { [L[k - 1], L[k]] = [L[k], L[k - 1]]; }), null, 'Выше в списке'), btn('↓', () => change(() => { [L[k + 1], L[k]] = [L[k], L[k + 1]]; })), btn('✕', () => change(() => L.splice(k, 1))));
+      head.querySelectorAll('button')[0].disabled = k === 0; head.querySelectorAll('button')[1].disabled = k === L.length - 1;
+      const props = h('div', { class: 'row' }, t ? SC.GROUPS[t.group].props.map(p => propSel(l, p, t)) : null,
+        h('input', { type: 'text', value: l.desc.extra || '', placeholder: 'дополнение: включения, прослои…', style: 'flex:1;min-width:160px', onchange: e => change(() => { l.desc.extra = e.target.value.trim(); }) }));
+      const calc = h('div', { class: 'row' }, h('span', { class: 'note' }, 'vнр:'), codeSel(l, t), q ? h('span', { class: 'note', title: 'vнр при h = 0,4 / 1 / 2 / 3 / 5 / 10 м' }, q.v.map(z => U.fmt(z, 2)).join(' / ') + ' м/с') : null,
+        ok ? null : h('span', { class: 'pill unv' }, 'не по описанию'));
+      const gen = h('div', { class: 'row note' }, 'Генератор: залегание', num(() => l.gen.order ?? k + 1, x => l.gen.order = x ?? k + 1, { step: 1, w: 48, title: '1 — верхний' }),
+        'мощн.', num(() => l.gen.t, x => l.gen.t = x ?? 0, { step: 0.5, w: 58 }), 'м ± ', num(() => l.gen.var, x => l.gen.var = U.clamp(x ?? 0, 0, 1.5), { step: 0.1, w: 52 }),
+        chk(() => l.gen.lens, x => l.gen.lens = x, 'линза', 'Слой только между створами'), num(() => l.gen.from, x => l.gen.from = U.clamp(x ?? 1, 1, N), { step: 1, w: 52 }), '–', num(() => Math.min(l.gen.to, N), x => l.gen.to = U.clamp(x ?? N, 1, N), { step: 1, w: 52 }));
+      return h('div', { class: 'layer' }, head, props, h('div', { class: 'desc' }, SC.layerText(l)), calc, gen);
+    });
     const modes = L.map((l, k) => ['Кровля ' + l.no, 'top', k]);
     if (L.length) modes.push(['Ластик ' + L[mode.layer].no, 'erase', mode.layer]);
     const tr = []; for (let i = 0; i < N; i++) tr.push(h('tr', { class: 'z-' + P.zoneKey(V.geodesy, i) }, h('td', {}, i + 1), h('td', { class: 'num' }, U.fmt(V.geodesy.z[i])),
-      L.map(l => h('td', {}, num(() => l.tops[i], q => { l.tops[i] = q == null || q === 0 ? null : U.r2(Math.min(q, V.geodesy.z[i])); }, { w: 76 })))));
-    box.append(h('div', { class: 'grid2' },
-      step(4, 'Грунты: библиотека и границы слоёв', h('div', { style: 'overflow:auto' }, tbl(['№', 'Грунт', 'Залег.', 'Мощн.', 'Изм.', 'Линза', ''], rows)),
-        h('div', { class: 'row' }, btn('+ ИГУ', () => change(() => L.push({ no: String(L.length + 1), code: 20, tops: new Array(N).fill(null), gen: { t: 3, var: 0.3, lens: false, from: 1, to: N, order: Math.max(0, ...L.map(l => l.gen.order || 0)) + 1 } }))),
+      L.map(l => h('td', {}, num(() => l.tops[i], x => { l.tops[i] = x == null || x === 0 ? null : U.r2(Math.min(x, V.geodesy.z[i])); }, { w: 76 })))));
+    box.append(h('div', { class: 'grid-half' },
+      step(4, 'Грунты: описание по справочнику и границы слоёв', blocks,
+        h('div', { class: 'row' }, btn('+ ИГУ', () => change(() => L.push({ no: String(L.length + 1), code: 16, desc: { type: 'sand-m' }, tops: new Array(N).fill(null), gen: { t: 3, var: 0.3, lens: false, from: 1, to: N, order: Math.max(0, ...L.map(l => l.gen.order || 0)) + 1 } }))),
           btn('Сгенерировать границы', () => change(() => P.generateSoil(V)), 'primary')),
-        kv([['Условный низ', num(() => geo.ubv, q => geo.ubv = q, { step: 0.5 }), 'м'], ['Плавность слоёв', num(() => geo.corr, q => geo.corr = U.clamp(q ?? 10, 2, 40), { step: 1, title: 'Створов на «волну» кровли' })],
-          ['Зерно', h('span', { class: 'pair' }, num(() => geo.seed, q => geo.seed = q | 0, { step: 1, w: 90 }), btn('🎲', () => change(() => { geo.seed = B.newSeed(); P.generateSoil(V); })))]])),
+        kv([['Условный низ', num(() => geo.ubv, x => geo.ubv = x, { step: 0.5 }), 'м'], ['Плавность слоёв', num(() => geo.corr, x => geo.corr = U.clamp(x ?? 10, 2, 40), { step: 1, title: 'Створов на «волну» кровли' })],
+          ['Зерно', h('span', { class: 'pair' }, num(() => geo.seed, x => geo.seed = x | 0, { step: 1, w: 90 }), btn('🎲', () => change(() => { geo.seed = B.newSeed(); P.generateSoil(V); })))]])),
       h('div', {}, profileCard(modes), card(null, more('Отметки кровли по створам', h('div', { class: 'scroll' }, tbl(['Створ', 'Земля'].concat(L.map(l => 'ИГУ ' + l.no)), tr)))))));
   }
 
@@ -251,36 +271,26 @@
   /* ---------- 17. Топоповерхность ---------- */
   function renderTopo() {
     const box = pane('topo'), t = V.topo, w = P.widths(V.geodesy);
-    const cv = h('canvas', { class: 'topo', width: 640, height: 640 }), info = h('span', { class: 'note' });
-    const build = () => { topoCache = B.topo.generate(V); paintTopo(cv, topoCache); info.textContent = `${topoCache.points.length} точек`; };
+    const cv = h('canvas', { class: 'topo', width: 1000, height: 1000 }), info = h('span', { class: 'note' });
+    const nat = () => t.natural ?? ((Number(t.radius) || 0) !== 0);
+    const build = () => { topoCache = B.topo.generate(V); const r = C.topoPlan(cv, topoCache, { interval: t.contour || null });
+      info.textContent = `${topoCache.points.length} точек · горизонтали ${U.fmt(r.interval, 2)} м${topoCache.oxbows ? ' · стариц ' + topoCache.oxbows : ''}${topoCache.ravines ? ' · оврагов ' + topoCache.ravines : ''}`; };
     const csv = (sep, comma, sfx) => () => { if (!topoCache) build(); download(fname('Топоповерхность' + sfx, 'csv'), (comma ? '﻿' : '') + B.topo.toCSV(topoCache, sep, comma), 'text/csv'); };
+    const png = () => cv.toBlob(bl => download(fname('Топоплан', 'png'), bl));
+    const reset = () => { topoCache = null; };
     box.append(h('div', { class: 'grid2' }, step(17, 'Топоповерхность', kv([
-      ['Радиус реки в плане', num(() => t.radius, x => { t.radius = x ?? 0; topoCache = null; }, { step: 500, title: '0 — прямая; +R — изгиб влево, −R — вправо' }), 'м'],
-      ['Сторона квадрата', num(() => t.size, x => { t.size = x; topoCache = null; }, { auto: () => t.size == null, ph: String(w.total), step: 50 }), 'м'],
-      ['Шаг сетки', num(() => t.gridStep, x => { t.gridStep = U.clamp(x ?? 10, 1, 200); topoCache = null; }, { step: 1 }), 'м'],
-      ['Неровности рельефа', num(() => t.amp, x => { t.amp = x ?? 0; topoCache = null; }, { step: 0.1 }), 'м'],
-      ['Зерно', h('span', { class: 'pair' }, num(() => t.seed, x => { t.seed = x | 0; topoCache = null; }, { step: 1, w: 90 }), btn('🎲', () => change(() => { t.seed = B.newSeed(); topoCache = null; })))]]),
-      h('div', { class: 'row' }, btn('CSV (X;Y;Z)', csv(';', true, ''), 'primary', 'Разделитель «;», десятичная запятая'), btn('CSV (x,y,z)', csv(',', false, '_dot'), null, 'Разделитель «,», десятичная точка'), info),
-      h('p', { class: 'note' }, 'Квадрат в плане, ось дороги — его центральная ось (Y = 0); сечение по ней совпадает с профилем. Y — по течению.')),
+      ['Радиус реки в плане', num(() => t.radius, x => { t.radius = x ?? 0; reset(); }, { step: 500, title: '0 — прямая; +R — изгиб влево, −R — вправо (по течению)' }), 'м'],
+      ['Естественный рельеф', chk(nat, x => { t.natural = x; reset(); }, 'гривы, валы, старицы, овраги', 'По умолчанию включён при R ≠ 0; при R = 0 — только небольшие холмы и впадины')],
+      ['Неровности', num(() => t.amp, x => { t.amp = x ?? 0; reset(); }, { step: 0.1 }), 'м'],
+      ['Сторона квадрата', num(() => t.size, x => { t.size = x; reset(); }, { auto: () => t.size == null, ph: String(w.total), step: 50 }), 'м'],
+      ['Шаг сетки точек', num(() => t.gridStep, x => { t.gridStep = U.clamp(x ?? 10, 1, 200); reset(); }, { step: 1 }), 'м'],
+      ['Горизонтали через', sel([['', 'авто'], ['0.25', '0,25 м'], ['0.5', '0,5 м'], ['1', '1 м'], ['2', '2 м']], () => t.contour ?? '', x => { t.contour = x ? Number(x) : null; })],
+      ['Зерно', h('span', { class: 'pair' }, num(() => t.seed, x => { t.seed = x | 0; reset(); }, { step: 1, w: 90 }), btn('🎲', () => change(() => { t.seed = B.newSeed(); reset(); })))]]),
+      h('div', { class: 'row' }, btn('CSV (X;Y;Z)', csv(';', true, ''), 'primary', 'Облако точек: разделитель «;», десятичная запятая'), btn('CSV (x,y,z)', csv(',', false, '_dot'), null, 'Разделитель «,», десятичная точка'), btn('PNG', png, null, 'Изображение плана')),
+      info,
+      h('p', { class: 'note' }, 'Квадрат в плане, ось дороги — его центральная ось; сечение по ней совпадает с профилем задания. Голубым — вода при уровне на дату изысканий.')),
       card(null, cv)));
     build();
-  }
-  const toISO = s => { const q = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(s || ''); return q ? `${q[3]}-${q[2]}-${q[1]}` : ''; };
-  const fromISO = s => { const q = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || ''); return q ? `${q[3]}.${q[2]}.${q[1]}` : ''; };
-
-  function paintTopo(cv, res) {
-    const ctx = cv.getContext('2d'), n = res.n, W = cv.width, cell = W / n, zs = res.points.map(p => p[2]), lo = Math.min(...zs), hi = Math.max(...zs), unm = V.hydro.unm;
-    const col = z => { if (z < unm) { const t = U.clamp((unm - z) / Math.max(0.5, unm - lo), 0, 1); return `rgb(${Math.round(140 - 90 * t)},${Math.round(185 - 80 * t)},${Math.round(230 - 40 * t)})`; }
-      const t = U.clamp((z - unm) / (hi - unm || 1), 0, 1); return `rgb(${Math.round(196 + 40 * t - 60 * t * t)},${Math.round(214 - 40 * t)},${Math.round(160 - 60 * t)})`; };
-    ctx.clearRect(0, 0, W, W);
-    for (let iy = 0; iy < n; iy++) for (let ix = 0; ix < n; ix++) {
-      const z = res.points[iy * n + ix][2], zx = ix < n - 1 ? res.points[iy * n + ix + 1][2] : z, zy = iy < n - 1 ? res.points[(iy + 1) * n + ix][2] : z;
-      ctx.fillStyle = col(z); ctx.fillRect(ix * cell, iy * cell, cell + 0.6, cell + 0.6);            // строка iy = 0 — верх (выше по течению)
-      const shade = U.clamp(((zx - z) + (zy - z)) * 0.6, -0.35, 0.35);
-      if (shade) { ctx.fillStyle = shade > 0 ? `rgba(255,255,255,${shade})` : `rgba(0,0,0,${-shade})`; ctx.fillRect(ix * cell, iy * cell, cell + 0.6, cell + 0.6); }
-    }
-    ctx.setLineDash([6, 5]); ctx.strokeStyle = '#7b3fa0'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(0, W / 2); ctx.lineTo(W, W / 2); ctx.stroke(); ctx.setLineDash([]);
-    ctx.fillStyle = '#1f2328'; ctx.font = '12px sans-serif'; ctx.fillText('ось дороги', 6, W / 2 - 6); ctx.fillText('↓ течение', W - 70, 16);
   }
 
   /* ================= Выдача ================= */
@@ -364,7 +374,7 @@
       <h4>Метеорологические сведения</h4><table class="noborder"><tr><td>Расчетная скорость ветра, м/с</td><td>${f(hy.wind.v)}</td></tr><tr><td>Длина разгона ветровой волны, км</td><td>${f(hy.wind.fetch)}</td></tr></table><div class="foot">Страница 3 из 4</div></div>`;
     const L = V.geology.layers;
     const p4 = `<div class="sheet"><h2>4. Результаты инженерно-геологических изысканий</h2>
-      ${T(['ИГУ', 'Описание грунта'], L.map(l => { const s = B.SOILS.find(q => q.code === l.code); return [l.no, s ? [s.name, s.sub, s.ch1, s.ch2].filter(Boolean).join(', ') : '?']; }))}
+      ${T(['ИГУ', 'Описание грунта'], L.map(l => [l.no, B.SOILCAT.layerText(l)]))}
       <p><b>Инженерно-геологический разрез по оси перехода</b></p>${svgG.outerHTML}<div class="foot">Страница 4 из 4</div></div>`;
     return p1 + p2 + p3 + p4;
   }

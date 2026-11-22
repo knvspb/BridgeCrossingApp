@@ -92,12 +92,18 @@
         "ubv": { "type": "number", "description": "Условный низ нижнего ИГУ, м" },
         "layers": { "type": "array", "items": { "type": "object", "required": ["code"], "properties": {
           "no": { "type": "string", "description": "Номер ИГУ" },
-          "code": { "type": "integer", "minimum": 1, "maximum": 44, "description": "Код грунта по справочнику неразмывающих скоростей (core/soils.js)" },
+          "code": { "type": "integer", "minimum": 1, "maximum": 44, "description": "Расчётная категория по таблице неразмывающих скоростей (core/soils.js); нет — по описанию" },
+          "desc": { "type": "object", "description": "Описание грунта выбором из справочника (core/soilcat.js, ГОСТ 25100)", "properties": {
+            "type": { "type": "string", "description": "boulder, pebble, gravel, sand-g, sand-c, sand-m, sand-f, sand-s, sandy-loam, loam-l, loam-h, clay-l, clay-h, loess, silt, peat, topsoil, marl, shale, limest, sandst, congl" },
+            "variety": { "enum": ["", "sandy", "silty"] }, "filler": { "enum": ["", "sand", "sandyloam", "loam", "clay"] },
+            "density": { "enum": ["", "dense", "medium", "loose"] }, "sr": { "enum": ["", "low", "mid", "sat"] },
+            "il": { "enum": ["", "solid", "semisolid", "stiff", "soft", "vsoft", "plastic", "fluid"] }, "e": { "enum": ["", "e4", "e3", "e2", "e1"] },
+            "strength": { "enum": ["", "vstrong", "strong", "mstrong", "weak"] }, "extra": { "type": "string" } } },
           "tops": { "type": "array", "items": { "type": ["number", "null"] }, "description": "Отметки кровли по створам; null — слоя нет. Нет массива — генерируется." },
           "gen": { "type": "object", "properties": { "order": { "type": "number" }, "t": { "type": "number" }, "var": { "type": "number" }, "lens": { "type": "boolean" }, "from": { "type": "integer" }, "to": { "type": "integer" } } } } } }
       }
     },
-    "topo": { "type": "object", "properties": { "radius": { "type": "number", "description": "Радиус кривизны реки в плане, м; 0 — прямая, > 0 — влево" }, "gridStep": { "type": "number" }, "size": { "type": ["number", "null"] }, "amp": { "type": "number" }, "seed": { "type": "integer" } } },
+    "topo": { "type": "object", "properties": { "radius": { "type": "number", "description": "Радиус кривизны реки в плане, м; 0 — прямая, > 0 — влево" }, "natural": { "type": ["boolean", "null"], "description": "Естественный рельеф (гривы, валы, старицы, овраги); null — включён при radius ≠ 0" }, "contour": { "type": ["number", "null"], "description": "Шаг горизонталей, м; null — авто" }, "gridStep": { "type": "number" }, "size": { "type": ["number", "null"] }, "amp": { "type": "number" }, "seed": { "type": "integer" } } },
     "gen": { "type": "object", "description": "Параметры генератора профиля (служебные)" },
     "library": { "type": "object", "description": "Справочник шероховатости (служебный)" }
   },
