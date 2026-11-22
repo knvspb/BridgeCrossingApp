@@ -286,11 +286,11 @@
     const box = pane('topo'), t = V.topo, w = P.widths(V.geodesy);
     const cv = h('canvas', { class: 'topo', width: 1000, height: 1000 }), info = h('span', { class: 'note' });
     const nat = () => t.natural ?? ((Number(t.radius) || 0) !== 0);
-    const build = () => { topoCache = B.topo.generate(V); const r = C.topoPlan(cv, topoCache, { interval: t.contour || null, smooth: t.smooth ?? 2 });
-      info.textContent = `${topoCache.points.length} точек · горизонтали ${U.fmt(r.interval, 2)} м · уклон долины ${U.fmt(topoCache.valleySlope * 1e5, 2)}·10⁻⁵ (извилистость ${U.fmt(topoCache.sinuosity, 3)})${topoCache.lakes ? ' · озёр-стариц ' + topoCache.lakes : ''}${topoCache.ravines ? ' · оврагов ' + topoCache.ravines : ''}`; };
+    const build = () => { topoCache = B.topo.generate(V); const r = C.topoPlan(cv, topoCache, { interval: t.contour || null, smooth: t.smooth ?? 2, minR: t.minR ?? B.topo.MIN_RADIUS });
+      const st = r.stat, mr = t.minR ?? B.topo.MIN_RADIUS; info.textContent = `${topoCache.points.length} точек · горизонтали ${U.fmt(r.interval, 2)} м${mr > 0 ? ` · R ≥ ${mr} м: ${st.lines - st.tight - st.small} из ${st.lines} линий (у узких форм — по ширине формы: ${st.tight}; мелких замкнутых: ${st.small})` : ''} · уклон долины ${U.fmt(topoCache.valleySlope * 1e5, 2)}·10⁻⁵ (извилистость ${U.fmt(topoCache.sinuosity, 3)})${topoCache.lakes ? ' · озёр-стариц ' + topoCache.lakes : ''}${topoCache.ravines ? ' · оврагов ' + topoCache.ravines : ''}`; };
     const csv = (sep, comma, sfx) => () => { if (!topoCache) build(); download(fname('Топоповерхность' + sfx, 'csv'), (comma ? '﻿' : '') + B.topo.toCSV(topoCache, sep, comma), 'text/csv'); };
     const png = () => cv.toBlob(bl => download(fname('Топоплан', 'png'), bl));
-    const dxf = () => { if (!topoCache) build(); download(fname('Топоплан', 'dxf'), B.topo.toDXF(topoCache, { interval: t.contour || null, smooth: t.smooth ?? 2 }), 'application/dxf'); };
+    const dxf = () => { if (!topoCache) build(); download(fname('Топоплан', 'dxf'), B.topo.toDXF(topoCache, { interval: t.contour || null, smooth: t.smooth ?? 2, minR: t.minR ?? B.topo.MIN_RADIUS }), 'application/dxf'); };
     const reset = () => { topoCache = null; };
     box.append(h('div', { class: 'grid2' }, step(17, 'Топоповерхность', kv([
       ['Радиус реки в плане', num(() => t.radius, x => { t.radius = x ?? 0; reset(); }, { step: 500, title: '0 — прямая; +R — изгиб влево, −R — вправо (по течению)' }), 'м'],
@@ -300,6 +300,7 @@
       ['Шаг сетки точек', num(() => t.gridStep, x => { t.gridStep = U.clamp(x ?? 10, 1, 200); reset(); }, { step: 1 }), 'м'],
       ['Горизонтали через', sel([['', 'авто'], ['0.25', '0,25 м'], ['0.5', '0,5 м'], ['1', '1 м'], ['2', '2 м']], () => t.contour ?? '', x => { t.contour = x ? Number(x) : null; })],
       ['Сглаживание горизонталей', sel([['0', 'нет'], ['1', 'среднее'], ['2', 'сильное'], ['3', 'очень сильное']], () => t.smooth ?? 2, x => { t.smooth = Number(x); }, { title: 'Действует на план и на выгрузку DXF' })],
+      ['Минимальный радиус горизонталей', num(() => t.minR ?? B.topo.MIN_RADIUS, x => { t.minR = x == null ? null : U.clamp(x, 0, 500); }, { step: 5, title: 'Изгибы с меньшим радиусом сглаживаются; 0 — без ограничения. Действует на план и DXF' }), 'м'],
       ['Зерно', h('span', { class: 'pair' }, num(() => t.seed, x => { t.seed = x | 0; reset(); }, { step: 1, w: 90 }), btn('🎲', () => change(() => { t.seed = B.newSeed(); reset(); })))]]),
       h('div', { class: 'row' }, btn('CSV (X;Y;Z)', csv(';', true, ''), 'primary', 'Облако точек: разделитель «;», десятичная запятая'), btn('CSV (x,y,z)', csv(',', false, '_dot'), null, 'Разделитель «,», десятичная точка'), btn('PNG', png, null, 'Изображение плана'), btn('DXF', dxf, null, 'AutoCAD: горизонтали — 3D-полилинии с отметками; урез, ось дороги и русла — 3D; подписи')),
       info,

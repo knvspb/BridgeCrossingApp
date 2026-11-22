@@ -241,3 +241,18 @@ test('своя база грунтов: выгрузка в Excel и загру�
   const v = B.schema.defaultVariant(1); v.geology.customDb = c; B.schema.setSoilDb(v, 'custom');
   assert.deepEqual(v.geology.layers.map(l => l.code), [2, 15, 13, 16, 4]);
 });
+
+test('горизонтали: минимальный радиус и отсутствие длинных прямых', () => {
+  const v = B.schema.defaultVariant(1), Rmin = 25, sp = 2;
+  for (const R of [0, 2500, -1200]) {
+    const r = B.topo.generate(v, { radius: R }), c = B.topo.contours(r, 0.5, { smooth: 2, minR: Rmin });
+    let bad = 0, tot = 0, maxStraight = 0;
+    c.forEach(q => q.lines.forEach(l => {
+      let p = l.pts; if (l.closed) p = p.slice(0, -1); const m = p.length, id = k => l.closed ? ((k % m) + m) % m : k; tot += m;
+      if (!l.small && !l.tight) for (let k = l.closed ? 0 : sp; k < (l.closed ? m : m - sp); k++) if (B.topo.radius3(p[id(k - sp)], p[k], p[id(k + sp)]) < Rmin * 0.96) bad++;
+      let run = 0; for (let k = 3; k < m - 3; k++) { const rr = B.topo.radius3(p[k - 3], p[k], p[k + 3]); if (rr > 3000) { run += Math.hypot(p[k][0] - p[k - 1][0], p[k][1] - p[k - 1][1]); maxStraight = Math.max(maxStraight, run); } else run = 0; }
+    }));
+    assert.ok(bad <= 0.001 * tot, `R=${R}: нарушений радиуса ${bad} из ${tot}`);
+    assert.ok(maxStraight < 350, `R=${R}: почти прямой участок ${maxStraight.toFixed(0)} м`);
+  }
+});

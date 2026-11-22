@@ -25,6 +25,7 @@
   const BCA = root.BCA || (root.BCA = {});
   const U = BCA.util;
   const T = BCA.topo = {};
+  T.MIN_RADIUS = 25;                                                            // минимальный радиус горизонталей по умолчанию, м
   const smooth = t => { t = U.clamp(t, 0, 1); return t * t * (3 - 2 * t); };
 
   T.generate = (v, opt = {}) => {
@@ -32,6 +33,7 @@
     const Lp = x[N - 1], L = t.size || Lp, step = Math.max(1, t.gridStep || 10), n = Math.floor(L / step) + 1;
     const R = Number(t.radius) || 0, slope = v.hydro.slope.i || 0, rng = BCA.rng(t.seed | 0);
     const natural = t.natural ?? (R !== 0);
+    const Rmin = t.minR ?? T.MIN_RADIUS ?? 25;                                   // формы рельефа генератора не уже 2·Rmin
     const off = (L - Lp) / 2;
     const xL = x[I.iL], xR = x[I.iR], xc = (xL + xR) / 2, hw = (xR - xL) / 2, W = 2 * hw;
     const xBL = x[I.bl], xBR = x[I.br];
@@ -65,6 +67,13 @@
       return fill(q);
     };
     const nEdgeL = BCA.smoothNoise(rng, n + 1, Math.max(3, n / 10)), nEdgeR = BCA.smoothNoise(rng, n + 1, Math.max(3, n / 10));
+    /* плавное поперечное смещение долины вне русла (большие радиусы вместо прямых): D(q, y) = A(q)·s(y)·g(q),
+       s(0) = 0; A — своё для левой и правой стороны; g = 0 в русле (при R = 0 река остаётся прямой).
+       |∂D/∂q| < 0,5 — смещение монотонно, формы рельефа не перехлёстываются. */
+    const dA = (natural ? 1 : 0.5) * Math.min(40, 0.06 * L), dL = rng.uniform(0.5, 1) * dA * (rng.next() < 0.5 ? -1 : 1), dR = rng.uniform(0.5, 1) * dA * (rng.next() < 0.5 ? -1 : 1);
+    const dLam = L * rng.uniform(0.09, 0.15), dPh = rng.uniform(0, 6.28), dLam2 = L * rng.uniform(0.05, 0.07), dPh2 = rng.uniform(0, 6.28);   // длины волн 0,6–0,9 L и 0,3–0,45 L
+    const dS = y => (Math.sin(y / dLam + dPh) - Math.sin(dPh)) + 0.35 * (Math.sin(y / dLam2 + dPh2) - Math.sin(dPh2));
+    const drift = (q, y) => { const w = smooth((q - xc + 300) / 600), A = dL * (1 - w) + dR * w, gch = smooth((Math.abs(q - xc) - hw) / (1.5 * W)); return A * gch * dS(y); };
     const eA = natural ? 35 : 12;                                               // извилистость бровки коренного берега, м
 
     /* плановое положение русла и долины */
@@ -83,7 +92,7 @@
 
     /* возмущения */
     const nHill = BCA.fourierNoise2D(rng, Math.max(3, n / 10));
-    const nGriva = BCA.fourierNoise2D(rng, [Math.max(2, n / 45), Math.max(6, n / 5)]);
+    const nGriva = BCA.fourierNoise2D(rng, [Math.max(2, n / 45, 2.5 * Rmin / step), Math.max(6, n / 5)]);   // гривы не уже 2,5·Rmin
     const nBed = BCA.fourierNoise2D(rng, Math.max(3, n / 14));
     const amp = t.amp ?? 0.3;
     // серповидные озёра-старицы — только вдали от оси дороги (не пересекают её)
@@ -94,7 +103,7 @@
         const left = rng.next() < (xL - xBL) / ((xL - xBL) + (xBR - xR) || 1);
         const a = left ? xBL + 0.3 * W : xR + 0.6 * W, b = left ? xL - 0.6 * W : xBR - 0.3 * W;
         if (b - a < 0.8 * W) continue;
-        const cyAbs = rng.uniform(0.3, 0.45) * L, r0 = rng.uniform(0.3, 0.45) * (b - a), w = rng.uniform(0.2, 0.3) * r0 + 8;
+        const cyAbs = rng.uniform(0.3, 0.45) * L, r0 = rng.uniform(0.3, 0.45) * (b - a), w = Math.max(Rmin * 1.3, rng.uniform(0.2, 0.3) * r0 + 8);
         const r = Math.min(r0, cyAbs - 0.15 * L - w); if (r < 20) continue;
         lakes.push({ cx: (a + b) / 2 + rng.uniform(-0.1, 0.1) * (b - a), cy: (rng.next() < 0.5 ? -1 : 1) * cyAbs, r, w, d: rng.uniform(1.2, 2.5), a0: rng.uniform(0, 2 * Math.PI), span: rng.uniform(2.2, 3.6) });
       }
@@ -103,7 +112,7 @@
     const ravines = [];
     if (natural) for (const side of [-1, 1]) {
       const k = rng.int(1, 2);
-      for (let j = 0; j < k; j++) ravines.push({ side, y0: (rng.next() < 0.5 ? -1 : 1) * rng.uniform(0.2, 0.45) * L, d: rng.uniform(1.5, 3.5), w: rng.uniform(14, 26), wig: rng.uniform(25, 50), lam: rng.uniform(70, 130), ph: rng.uniform(0, 6.28), head: rng.uniform(120, 260) });
+      for (let j = 0; j < k; j++) ravines.push({ side, y0: (rng.next() < 0.5 ? -1 : 1) * rng.uniform(0.2, 0.45) * L, d: rng.uniform(1.5, 3.5), w: Math.max(Rmin * 1.3, rng.uniform(14, 26)), wig: rng.uniform(25, 50), lam: rng.uniform(70, 130), ph: rng.uniform(0, 6.28), head: rng.uniform(120, 260) });
     }
 
     const pts = [], axis = [], wl = [], wl0 = g.surveyLevel ?? v.hydro.unm;
@@ -112,7 +121,8 @@
       axis.push([U.r2(off + s_v + xc + rel), U.r2(y)]);
       wl.push(U.r2(wl0 - slope * s));
       for (let ix = 0; ix < n; ix++) {
-        const X = ix * step, q = X - off - s_v;                                // абсцисса в координатах долины (профиля)
+        const X = ix * step, q0 = X - off - s_v;                               // абсцисса в координатах долины (профиля)
+        const q = q0 - f * drift(q0, y);                                       // с плавным смещением долины вне русла
         const cq = xc + rel, u = (q - cq) * cos / hw;                          // положение поперёк русла
         const qe = q - f * eA * (nEdgeL[iy] * Math.exp(-Math.pow((q - xBL) / 70, 2)) + nEdgeR[iy] * Math.exp(-Math.pow((q - xBR) / 70, 2)));
         const oldBed = qe > xL && qe < xR;                                     // прежнее положение русла (если оно сместилось)
@@ -253,14 +263,69 @@
     if (closed) out.push(out[0]);
     return T.chaikin({ pts: out, closed }, 2);
   };
+  /* Минимальный радиус кривизны Rmin: на участках, где радиус (по трём точкам на расстоянии ≈ Rmin/4 вдоль линии)
+     меньше Rmin, линия локально сглаживается (лапласиан, λ = 0,5) до выполнения условия; концы незамкнутых
+     линий неподвижны. Замкнутые линии с периметром меньше 2πRmin (мелкие бугры и западины) геометрически
+     не могут иметь радиус ≥ Rmin — они остаются скруглёнными, без принудительного ограничения. */
+  T.radius3 = (a, b, c) => { const ab = Math.hypot(b[0] - a[0], b[1] - a[1]), bc = Math.hypot(c[0] - b[0], c[1] - b[1]), ca = Math.hypot(a[0] - c[0], a[1] - c[1]);
+    const cr = Math.abs((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])); return cr < 1e-12 ? Infinity : ab * bc * ca / (2 * cr); };
+  T.minRadius = (line, Rmin, ds) => {
+    if (!(Rmin > 0) || line.pts.length < 5) return line;
+    const closed = line.closed;
+    if (closed && T.lineLength(line) < 2 * Math.PI * Rmin) return Object.assign({ small: true }, line);
+    const sp = Math.max(1, Math.round(Rmin / 4 / ds));
+    const area = l => { let s = 0; for (let k = 1; k < l.pts.length; k++) s += l.pts[k - 1][0] * l.pts[k][1] - l.pts[k][0] * l.pts[k - 1][1]; return Math.abs(s) / 2; };
+    let cur = T.resample(line, ds); const size0 = closed ? area(cur) : T.lineLength(cur); let best = Infinity, stall = 0, tight = false;
+    for (let round = 0; round < 400; round++) {
+      let p = cur.pts.map(q => q.slice()); if (closed) p.pop();
+      const m = p.length; if (m < 2 * sp + 3) break;
+      const idx = k => closed ? ((k % m) + m) % m : U.clamp(k, 0, m - 1);
+      const bad = new Uint8Array(m); let any = false, deficit = 0;
+      for (let k = 0; k < m; k++) {
+        if (!closed && (k < sp || k > m - 1 - sp)) continue;
+        const rr = T.radius3(p[idx(k - sp)], p[k], p[idx(k + sp)]);
+        if (rr < Rmin) { any = true; deficit += Rmin / rr - 1; for (let j = -3 * sp; j <= 3 * sp; j++) bad[idx(k + j)] = 1; }
+      }
+      if (!any) break;
+      if (deficit < best * 0.995) { best = deficit; stall = 0; } else if (++stall > 25) { tight = true; break; }
+      if (closed && area(cur) < 0.85 * size0) { tight = true; break; }          // узкая замкнутая форма: дальше — искажение, а не скругление
+      for (let it = 0; it < 10; it++) {
+        const q = p.map(x => x.slice());
+        for (let k = 0; k < m; k++) { if (!bad[k] || (!closed && (k === 0 || k === m - 1))) continue;
+          const a = p[idx(k - 1)], b = p[idx(k + 1)]; q[k][0] = 0.5 * p[k][0] + 0.25 * (a[0] + b[0]); q[k][1] = 0.5 * p[k][1] + 0.25 * (a[1] + b[1]); }
+        p = q;
+      }
+      if (closed) p.push(p[0].slice());
+      cur = T.resample({ pts: p, closed }, ds);                       // равномерный шаг — радиус всегда в одном масштабе
+    }
+    if (tight) cur.tight = true;
+    return cur;
+  };
   T.lineLength = l => { let s = 0; for (let k = 1; k < l.pts.length; k++) s += Math.hypot(l.pts[k][0] - l.pts[k - 1][0], l.pts[k][1] - l.pts[k - 1][1]); return s; };
   /* Сила сглаживания: 0 — нет, 1 — среднее, 2 — сильное, 3 — очень сильное (σ = 0 / 0,7 / 1,5 / 2,5 шага сетки). */
   T.SMOOTH_SIGMA = [0, 0.7, 1.5, 2.5];
-  const smoothOf = (res, level) => { const k = U.clamp(Math.round(level ?? 2), 0, 3), sg = T.SMOOTH_SIGMA[k] * res.step;
-    return l => sg > 0 ? T.smoothLine(l, sg, res.step / 3) : l; };
+  const smoothOf = (res, level, minR) => { const k = U.clamp(Math.round(level ?? 2), 0, 3), sg = T.SMOOTH_SIGMA[k] * res.step, R = minR ?? T.MIN_RADIUS;
+    return l => { const s = sg > 0 ? T.smoothLine(l, sg, res.step / 3) : l; return R > 0 ? T.minRadius(s, R, Math.min(res.step / 3, R / 6)) : s; }; };
+  /* Равномерная перенарезка полилинии с шагом ds (концы сохраняются). */
+  T.resample = (line, ds) => {
+    const p = line.pts; if (p.length < 2) return line;
+    const q = [p[0]]; let carry = 0;
+    for (let k = 1; k < p.length; k++) { const a = p[k - 1], b = p[k], L = Math.hypot(b[0] - a[0], b[1] - a[1]); let s = ds - carry;
+      while (s <= L) { const tt = s / L; q.push([a[0] + tt * (b[0] - a[0]), a[1] + tt * (b[1] - a[1])]); s += ds; } carry = L - (s - ds); }
+    if (line.closed) {                                                         // замкнутая: k точек ровно через периметр/k — без короткого звена у шва
+      const cum = [0]; for (let k = 1; k < p.length; k++) cum.push(cum[k - 1] + Math.hypot(p[k][0] - p[k - 1][0], p[k][1] - p[k - 1][1]));
+      const per = cum[cum.length - 1], k = Math.max(4, Math.round(per / ds)), d = per / k, r = []; let j = 0;
+      for (let i = 0; i < k; i++) { const s = i * d; while (j < cum.length - 2 && cum[j + 1] < s) j++; const seg = cum[j + 1] - cum[j] || 1, tt = (s - cum[j]) / seg;
+        r.push([p[j][0] + tt * (p[j + 1][0] - p[j][0]), p[j][1] + tt * (p[j + 1][1] - p[j][1])]); }
+      r.push(r[0].slice()); return { pts: r, closed: true };
+    }
+    const last = p[p.length - 1], ql = q[q.length - 1];
+    if (Math.hypot(last[0] - ql[0], last[1] - ql[1]) > ds * 0.3) q.push(last.slice()); else q[q.length - 1] = last.slice();
+    return { pts: q, closed: false };
+  };
   /* Горизонтали: [{ level, lines: [{ pts, closed }] }] — собранные и сглаженные. */
   T.contours = (res, interval, opt = {}) => {
-    const zs = res.points.map(p => p[2]), lo = Math.ceil(Math.min(...zs) / interval) * interval, hi = Math.max(...zs), sm = smoothOf(res, opt.smooth), out = [];
+    const zs = res.points.map(p => p[2]), lo = Math.ceil(Math.min(...zs) / interval) * interval, hi = Math.max(...zs), sm = smoothOf(res, opt.smooth, opt.minR), out = [];
     for (let lev = lo; lev <= hi + 1e-9; lev += interval) {
       const L = +lev.toFixed(6), val = zs.map(z => (z === L ? z + 1e-7 : z) - L);
       out.push({ level: L, lines: T.isolines(res, val).filter(l => !l.closed || T.lineLength(l) > res.step).map(sm) });
@@ -273,7 +338,7 @@
   /* Урез воды: изолиния поверхности относительно наклонного уровня воды wl(y). */
   T.waterEdge = (res, opt = {}) => {
     const n = res.n, val = res.points.map((p, k) => { const d = p[2] - res.wl[Math.floor(k / n)] + T.WET_TOL; return d === 0 ? 1e-7 : d; });
-    return T.isolines(res, val).filter(l => !l.closed || T.lineLength(l) > res.step).map(smoothOf(res, opt.smooth));
+    return T.isolines(res, val).filter(l => !l.closed || T.lineLength(l) > res.step).map(smoothOf(res, opt.smooth, opt.minR));
   };
   /* Шаг горизонталей по перепаду высот: 0,25 / 0,5 / 1 / 2 / 5 м. */
   T.autoInterval = res => { const zs = res.points.map(p => p[2]), d = Math.max(...zs) - Math.min(...zs); return [0.25, 0.5, 1, 2, 5].find(s => d / s <= 40) || 5; };
@@ -314,7 +379,7 @@
     };
     const isIdx = l => Math.abs(l / index - Math.round(l / index)) < 1e-6;
     const tol = opt.tol ?? 0.05;
-    T.contours(res, interval, { smooth: opt.smooth }).forEach(c => c.lines.map(l => T.simplify(l, tol)).forEach(l => {
+    T.contours(res, interval, { smooth: opt.smooth, minR: opt.minR }).forEach(c => c.lines.map(l => T.simplify(l, tol)).forEach(l => {
       poly3d(isIdx(c.level) ? 'HOR_UTOLSH' : 'HOR_OSN', l.pts, () => c.level, l.closed);
       if (isIdx(c.level) && l.pts.length > 6) {                                     // подпись в середине линии
         const k = Math.floor(l.pts.length / 2), a = l.pts[k - 1], b = l.pts[k + 1], ang = Math.atan2(-(b[1] - a[1]), b[0] - a[0]) * 180 / Math.PI;
@@ -322,7 +387,7 @@
         w(1, String(+c.level.toFixed(2)).replace('.', ',')); w(50, f(((ang + 90) % 180) - 90)); w(72, 1); w(11, f(l.pts[k][0])); w(21, f(-l.pts[k][1])); w(31, f(c.level));
       }
     }));
-    T.waterEdge(res, { smooth: opt.smooth }).map(l => T.simplify(l, tol)).forEach(l => poly3d('UREZ', l.pts, p => T.wlAt(res, p[1]), l.closed));
+    T.waterEdge(res, { smooth: opt.smooth, minR: opt.minR }).map(l => T.simplify(l, tol)).forEach(l => poly3d('UREZ', l.pts, p => T.wlAt(res, p[1]), l.closed));
     const road = []; for (let X = 0; X <= res.L + 1e-9; X += res.step / 2) road.push([X, 0]);
     poly3d('OS_DOROGI', road, p => T.zAt(res, p[0], 0), false);
     poly3d('OS_RUSLA', res.axis, p => T.wlAt(res, p[1]), false);

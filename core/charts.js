@@ -115,7 +115,17 @@
     const interval = opt.interval || BCA.topo.autoInterval(res), index = interval * 5, iters = opt.smooth ?? 2;
     ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, S, S);
     /* заливка: билинейная интерполяция z; вода — ниже наклонного уровня wl(y) */
-    const img = ctx.createImageData(A, A), D = img.data, zAt = (gx, gy) => P[gy * n + gx][2];
+    /* для заливки — сетка, сглаженная гауссом той же силы, что и горизонтали (согласование заливки воды и уреза) */
+    const sg = (BCA.topo.SMOOTH_SIGMA[U.clamp(Math.round(iters), 0, 3)] || 0) * 0.8, Zs = Float64Array.from(P, q => q[2]);
+    if (sg > 0) {
+      const r = Math.ceil(3 * sg), w = []; for (let j = -r; j <= r; j++) w.push(Math.exp(-0.5 * (j / sg) ** 2));
+      const pass = (src, dx, dy) => { const out = new Float64Array(src.length);
+        for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) { let s = 0, ws = 0;
+          for (let j = -r; j <= r; j++) { const xx = x + j * dx, yy = y + j * dy; if (xx < 0 || yy < 0 || xx >= n || yy >= n) continue; s += w[j + r] * src[yy * n + xx]; ws += w[j + r]; }
+          out[y * n + x] = s / ws; } return out; };
+      Zs.set(pass(pass(Zs, 1, 0), 0, 1));
+    }
+    const img = ctx.createImageData(A, A), D = img.data, zAt = (gx, gy) => Zs[gy * n + gx];
     for (let j = 0; j < A; j++) {
       const fy = j / (A - 1) * (n - 1), gy = Math.min(n - 2, Math.floor(fy)), ty = fy - gy, wl = res.wl[gy] * (1 - ty) + res.wl[gy + 1] * ty;
       for (let i = 0; i < A; i++) {
@@ -134,14 +144,16 @@
     ctx.save(); ctx.beginPath(); ctx.rect(M, M, A, A); ctx.clip();
     const path = l => { ctx.moveTo(px(l.pts[0][0]), py(l.pts[0][1])); for (let k = 1; k < l.pts.length; k++) ctx.lineTo(px(l.pts[k][0]), py(l.pts[k][1])); };
     /* горизонтали */
-    const cs = BCA.topo.contours(res, interval, { smooth: iters });
+    const cs = BCA.topo.contours(res, interval, { smooth: iters, minR: opt.minR });
     const isIdx = l => Math.abs(l / index - Math.round(l / index)) < 1e-6;
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     cs.forEach(c => { const idx = isIdx(c.level);
       ctx.strokeStyle = idx ? 'rgba(120,78,40,0.85)' : 'rgba(140,96,58,0.55)'; ctx.lineWidth = idx ? 1.4 : 0.7;
-      ctx.beginPath(); c.lines.forEach(path); ctx.stroke(); });
+      ctx.beginPath(); c.lines.forEach(path); ctx.stroke();
+      if (opt.debugTight) { ctx.strokeStyle = 'rgba(220,0,0,0.9)'; ctx.lineWidth = 2; ctx.beginPath(); c.lines.filter(l => l.tight || l.small).forEach(path); ctx.stroke(); } });
+    const stat = { lines: cs.reduce((s, c) => s + c.lines.length, 0), small: cs.reduce((s, c) => s + c.lines.filter(l => l.small).length, 0), tight: cs.reduce((s, c) => s + c.lines.filter(l => l.tight).length, 0) };
     /* урез воды по наклонному уровню */
-    ctx.strokeStyle = '#3a7fc0'; ctx.lineWidth = 1.2; ctx.beginPath(); BCA.topo.waterEdge(res, { smooth: iters }).forEach(path); ctx.stroke();
+    ctx.strokeStyle = '#3a7fc0'; ctx.lineWidth = 1.2; ctx.beginPath(); BCA.topo.waterEdge(res, { smooth: iters, minR: opt.minR }).forEach(path); ctx.stroke();
     /* подписи утолщённых горизонталей вдоль линий */
     const placed = [];
     ctx.font = '11px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -174,6 +186,6 @@
     ctx.font = '11px sans-serif'; ctx.textAlign = 'left'; ctx.fillText(`${nice} м`, bx + bw + 6, by - 1);
     ctx.textAlign = 'right'; ctx.fillText(`Горизонтали через ${String(interval).replace('.', ',')} м, утолщённые — через ${String(index).replace('.', ',')} м`, S - M, by - 1);
     ctx.textAlign = 'left'; ctx.fillText('↓ течение', S - M - 70, M - 12);
-    return { interval };
+    return { interval, stat };
   };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
