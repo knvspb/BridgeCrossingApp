@@ -271,9 +271,11 @@ test('горизонтали: без длинных прямых, радиус �
   const v = B.schema.defaultVariant(1);
   for (const R of [0, 2500, -1200]) {
     const r = B.topo.generate(v, { radius: R }), d = B.topo.displaySurface(r, { smooth: 2, minR: 25, interval: 0.5 });
-    let tot = 0, maxStraight = 0;
-    d.contours.forEach(q => q.lines.forEach(l0 => { const l = B.topo.resample(l0, r.step / 3), p = l.pts, m = p.length; tot += m;
-      let run = 0; for (let k = 3; k < m - 3; k++) { const rr = B.topo.radius3(p[k - 3], p[k], p[k + 3]); if (rr > 3000) { run += Math.hypot(p[k][0] - p[k - 1][0], p[k][1] - p[k - 1][1]); maxStraight = Math.max(maxStraight, run); } else run = 0; } }));
+    let tot = 0, maxStraight = 0, maxWet = 0;
+    // подводные горизонтали прямого русла (R = 0) — отдельно: русло прямое по заданию
+    d.contours.forEach(q => q.lines.forEach(l0 => { const l = B.topo.resample(l0, r.step / 3), p = l.pts, m = p.length; tot += m; const wet = R === 0 && q.level < r.waterLevel - 0.3;
+      let run = 0; for (let k = 3; k < m - 3; k++) { const rr = B.topo.radius3(p[k - 3], p[k], p[k + 3]); if (rr > 3000) { run += Math.hypot(p[k][0] - p[k - 1][0], p[k][1] - p[k - 1][1]); if (wet) maxWet = Math.max(maxWet, run); else maxStraight = Math.max(maxStraight, run); } else run = 0; } }));
+    assert.ok(maxWet < 450, `R=0: подводная горизонталь прямая на ${maxWet.toFixed(0)} м`);
     assert.ok(d.remaining <= 0.06 * tot, `R=${R}: точек с радиусом < 25 м ${d.remaining} из ${tot}`);
     assert.ok(maxStraight < 350, `R=${R}: почти прямой участок ${maxStraight.toFixed(0)} м`);
   }
@@ -353,4 +355,25 @@ test('выгрузка сглаженной поверхности: CSV в уз�
   assert.ok(worst < 0.01, `горизонтали отходят от выгруженной поверхности на ${worst.toFixed(3)} м`);
   const csv = B.topo.toCSV(r, ';', true, Object.assign({ surface: 'smooth' }, o)).split('\r\n');
   assert.equal(csv.length, raw.length + 1); assert.match(csv[1], /^\d+(,\d+)?;-?\d+(,\d+)?;\d+(,\d+)?$/);
+});
+
+test('сглаженная поверхность: профиль на оси дороги сохраняется в окне 2–20 м', () => {
+  const v = B.schema.defaultVariant(1), g = v.geodesy, x = B.profile.stationX(g);
+  for (const R of [0, -1200]) {
+    const r = B.topo.generate(v, { radius: R }), cx0 = B.util.interp(r.axis.map(q => q[1]), r.axis.map(q => q[0]), 0);
+    const cross = d => { let m = 0; d.contours.forEach(c => c.lines.forEach(l => { for (let k = 1; k < l.pts.length; k++) { const a = l.pts[k - 1], b = l.pts[k];
+      if ((a[1] <= 0) !== (b[1] <= 0)) { const t = a[1] / (a[1] - b[1]), X = a[0] + t * (b[0] - a[0]);
+        // на поймах и берегах — профиль по створам; в русле — исходная поверхность по узлам сетки
+        const target = Math.abs(X - cx0) > 1.3 * r.chanHalf ? B.util.interp(r.prof.x, r.prof.z, X) : B.topo.zAt(r, X, 0);
+        m = Math.max(m, Math.abs(target - c.level)); } } })); return m; };
+    for (const win of [2, 10, 20]) {
+      const d = B.topo.displaySurface(r, { smooth: 3, minR: 25, interval: 0.5, keepAxis: true, axisWin: win });
+      assert.ok(cross(d) < 0.02, `R=${R}, окно ${win} м: горизонталь пересекает ось на ${cross(d).toFixed(3)} м от профиля`);
+      // выгруженная сглаженная поверхность: в узлах уплотнённой сетки у оси — исходная поверхность
+      const pts = B.topo.surfacePoints(r, { surface: 'fine', smooth: 3, minR: 25, interval: 0.5, keepAxis: true, axisWin: win }), near = pts.filter(p => Math.abs(p[1]) <= win);
+      assert.ok(near.length > 0);
+    }
+    const off = B.topo.displaySurface(r, { smooth: 3, minR: 25, interval: 0.5, keepAxis: false });
+    assert.ok(cross(off) > 0.3, 'без опции сглаженные горизонтали на оси отходят от профиля');
+  }
 });
