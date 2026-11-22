@@ -192,10 +192,44 @@ test('смена базы: записи слоёв подбираются по �
 test('топоповерхность: естественный рельеф добавляет формы, но не трогает ось', () => {
   const v = B.schema.defaultVariant(1);
   const a = B.topo.generate(v, { radius: 2500 }), b = B.topo.generate(v, { radius: 2500, natural: false });
-  assert.ok(a.oxbows + a.ravines > 0);
+  assert.ok(a.lakes + a.ravines > 0);
   let diff = 0; a.points.forEach((p, k) => { diff = Math.max(diff, Math.abs(p[2] - b.points[k][2])); });
   assert.ok(diff > 1);
-  const c = B.topo.contours(a, 0.5); assert.ok(c.length > 10 && c.every(q => q.segs.length > 0));
+  const c = B.topo.contours(a, 0.5); assert.ok(c.length > 10 && c.every(q => q.lines.length > 0));
+});
+
+test('топоповерхность: старицы из профиля не прерываются до и после моста', () => {
+  const v = B.schema.defaultVariant(1);
+  for (const R of [0, 2500, -1200]) {
+    const r = B.topo.generate(v, { radius: R }), n = r.n;
+    const hw = 75, xs = [];
+    for (let iy = 0; iy < n; iy++) {                    // минимум левой поймы (без русла) с поправкой на уклон долины
+      const y = -r.L / 2 + iy * r.step, edge = r.axis[iy][0] - hw - 25; let m = Infinity;
+      for (let ix = 0; ix < n; ix++) { const p = r.points[iy * n + ix]; if (p[0] > 100 && p[0] < edge) m = Math.min(m, p[2] + r.valleySlope * y); }
+      xs.push(m);
+    }
+    assert.ok(Math.max(...xs) < 121.6, `R=${R}: понижение прерывается (min по рядам до ${Math.max(...xs).toFixed(2)})`);
+  }
+});
+
+test('топоповерхность: уклон по длине русла, наклонный урез, уклон долины = i·K', () => {
+  const v = B.schema.defaultVariant(1), i = v.hydro.slope.i;
+  const s = B.topo.generate(v, { radius: 0 }), c = B.topo.generate(v, { radius: 1200 });
+  assert.ok(Math.abs(s.sinuosity - 1) < 1e-6); assert.ok(c.sinuosity > 1.02);
+  assert.ok(Math.abs(c.valleySlope - i * c.sinuosity) < 1e-12);
+  const drop = r => r.wl[0] - r.wl[r.wl.length - 1];
+  assert.ok(Math.abs(drop(s) - i * s.L) < 0.02);
+  assert.ok(drop(c) > drop(s) + 0.005);                // на изгибе путь по руслу длиннее
+  assert.ok(Math.abs(B.topo.wlAt(s, 0) - v.geodesy.surveyLevel) < 0.006);
+});
+
+test('топоповерхность: DXF с 3D-горизонталями', () => {
+  const v = B.schema.defaultVariant(1), r = B.topo.generate(v, { radius: 2500 }), d = B.topo.toDXF(r, { interval: 0.5 });
+  assert.ok(d.includes('AC1009') && d.trim().endsWith('EOF'));
+  const L = d.split('\r\n'), polys = L.filter((x, k) => x === 'POLYLINE' && L[k - 1] === '0').length;
+  assert.ok(polys > 20);
+  ['HOR_OSN', 'HOR_UTOLSH', 'UREZ', 'OS_DOROGI', 'OS_RUSLA'].forEach(ly => assert.ok(L.includes(ly), 'нет слоя ' + ly));
+  for (let k = 0; k < L.length - 1; k++) if (L[k] === '70' && L[k - 2] === 'POLYLINE') assert.ok((Number(L[k + 1]) & 8) === 8);
 });
 
 test('своя база грунтов: выгрузка в Excel и загрузка обратно', async t => {

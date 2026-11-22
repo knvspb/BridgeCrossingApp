@@ -286,10 +286,11 @@
     const box = pane('topo'), t = V.topo, w = P.widths(V.geodesy);
     const cv = h('canvas', { class: 'topo', width: 1000, height: 1000 }), info = h('span', { class: 'note' });
     const nat = () => t.natural ?? ((Number(t.radius) || 0) !== 0);
-    const build = () => { topoCache = B.topo.generate(V); const r = C.topoPlan(cv, topoCache, { interval: t.contour || null });
-      info.textContent = `${topoCache.points.length} точек · горизонтали ${U.fmt(r.interval, 2)} м${topoCache.oxbows ? ' · стариц ' + topoCache.oxbows : ''}${topoCache.ravines ? ' · оврагов ' + topoCache.ravines : ''}`; };
+    const build = () => { topoCache = B.topo.generate(V); const r = C.topoPlan(cv, topoCache, { interval: t.contour || null, smooth: t.smooth ?? 3 });
+      info.textContent = `${topoCache.points.length} точек · горизонтали ${U.fmt(r.interval, 2)} м · уклон долины ${U.fmt(topoCache.valleySlope * 1e5, 2)}·10⁻⁵ (извилистость ${U.fmt(topoCache.sinuosity, 3)})${topoCache.lakes ? ' · озёр-стариц ' + topoCache.lakes : ''}${topoCache.ravines ? ' · оврагов ' + topoCache.ravines : ''}`; };
     const csv = (sep, comma, sfx) => () => { if (!topoCache) build(); download(fname('Топоповерхность' + sfx, 'csv'), (comma ? '﻿' : '') + B.topo.toCSV(topoCache, sep, comma), 'text/csv'); };
     const png = () => cv.toBlob(bl => download(fname('Топоплан', 'png'), bl));
+    const dxf = () => { if (!topoCache) build(); download(fname('Топоплан', 'dxf'), B.topo.toDXF(topoCache, { interval: t.contour || null, smooth: t.smooth ?? 3 }), 'application/dxf'); };
     const reset = () => { topoCache = null; };
     box.append(h('div', { class: 'grid2' }, step(17, 'Топоповерхность', kv([
       ['Радиус реки в плане', num(() => t.radius, x => { t.radius = x ?? 0; reset(); }, { step: 500, title: '0 — прямая; +R — изгиб влево, −R — вправо (по течению)' }), 'м'],
@@ -298,10 +299,11 @@
       ['Сторона квадрата', num(() => t.size, x => { t.size = x; reset(); }, { auto: () => t.size == null, ph: String(w.total), step: 50 }), 'м'],
       ['Шаг сетки точек', num(() => t.gridStep, x => { t.gridStep = U.clamp(x ?? 10, 1, 200); reset(); }, { step: 1 }), 'м'],
       ['Горизонтали через', sel([['', 'авто'], ['0.25', '0,25 м'], ['0.5', '0,5 м'], ['1', '1 м'], ['2', '2 м']], () => t.contour ?? '', x => { t.contour = x ? Number(x) : null; })],
+      ['Сглаживание горизонталей', sel([['0', 'нет'], ['2', 'среднее'], ['3', 'сильное'], ['4', 'очень сильное']], () => t.smooth ?? 3, x => { t.smooth = Number(x); })],
       ['Зерно', h('span', { class: 'pair' }, num(() => t.seed, x => { t.seed = x | 0; reset(); }, { step: 1, w: 90 }), btn('🎲', () => change(() => { t.seed = B.newSeed(); reset(); })))]]),
-      h('div', { class: 'row' }, btn('CSV (X;Y;Z)', csv(';', true, ''), 'primary', 'Облако точек: разделитель «;», десятичная запятая'), btn('CSV (x,y,z)', csv(',', false, '_dot'), null, 'Разделитель «,», десятичная точка'), btn('PNG', png, null, 'Изображение плана')),
+      h('div', { class: 'row' }, btn('CSV (X;Y;Z)', csv(';', true, ''), 'primary', 'Облако точек: разделитель «;», десятичная запятая'), btn('CSV (x,y,z)', csv(',', false, '_dot'), null, 'Разделитель «,», десятичная точка'), btn('PNG', png, null, 'Изображение плана'), btn('DXF', dxf, null, 'AutoCAD: горизонтали — 3D-полилинии с отметками; урез, ось дороги и русла — 3D; подписи')),
       info,
-      h('p', { class: 'note' }, 'Квадрат в плане, ось дороги — его центральная ось; сечение по ней совпадает с профилем задания. Голубым — вода при уровне на дату изысканий.')),
+      h('p', { class: 'note' }, 'Квадрат в плане, ось дороги — его центральная ось; сечение по ней совпадает с профилем задания. Дно русла и урез понижаются по течению с уклоном i по длине русла, пойма — с уклоном долины. Голубым — вода при уровне на дату изысканий.')),
       card(null, cv)));
     build();
   }
