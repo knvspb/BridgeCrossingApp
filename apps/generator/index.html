@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Генератор задания — мостовой переход</title>
+<link rel="stylesheet" href="generator.css">
+</head>
+<body>
+<header class="app">
+  <div>
+    <h1>Генератор задания · «Проект мостового перехода»</h1>
+    <div class="sub" id="hdrSub"></div>
+  </div>
+  <div class="sp"></div>
+  <button id="btnUndo" title="Ctrl+Z">↶ Отменить</button>
+  <button id="btnAutofill" title="Сгенерировать всё, что не заполнено преподавателем">Заполнить пустое</button>
+  <button id="btnRegen" title="Новый вариант: профиль, грунты и ряды уровней по новому зерну">🎲 Новый вариант</button>
+  <button id="btnOpen">Открыть…</button>
+  <button id="btnSave">Сохранить JSON</button>
+  <button id="btnXlsx" class="primary">Excel</button>
+  <input type="file" id="fileOpen" accept=".json,application/json" class="hide">
+</header>
+<nav class="tabs" id="tabs"></nav>
+<main>
+  <section id="tab-task"></section>
+  <section id="tab-geodesy" class="hide"></section>
+  <section id="tab-geology" class="hide"></section>
+  <section id="tab-hydro" class="hide"></section>
+  <section id="tab-topo" class="hide"></section>
+  <section id="tab-check" class="hide"></section>
+  <section id="tab-blank" class="hide"></section>
+  <section id="tab-templates" class="hide"></section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script src="../../vendor/exceljs.min.js"></script>
+<script src="../../core/bca.js"></script>
+<script src="../../core/soils.js"></script>
+<script src="../../core/catalogs.js"></script>
+<script src="../../core/profile.js"></script>
+<script src="../../core/hydraulics.js"></script>
+<script src="../../core/hydrology.js"></script>
+<script src="../../core/topo.js"></script>
+<script src="../../core/schema.js"></script>
+<script src="../../core/export.js"></script>
+<script src="../../core/charts.js"></script>
+<script src="generator.js"></script>
+</body>
+</html>

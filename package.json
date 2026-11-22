@@ -1,0 +1,7 @@
+{
+  "name": "bridge-crossing-app",
+  "private": true,
+  "description": "Изыскания и проектирование мостовых переходов — учебная среда (генератор задания и расчётные модули)",
+  "scripts": { "test": "node --test tests/*.test.js" },
+  "license": "UNLICENSED"
+}

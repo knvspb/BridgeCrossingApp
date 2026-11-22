@@ -115,6 +115,7 @@
       series.push({ year: h.post.firstYear + j, zMax: z2[dMax], dMax, navStart, navDays, jam, daily: z2 });
     }
     h.series = series;
+    h.seriesStamp = Hy.stamp(v);
     if (h.viu.z == null || h.viu.auto) { h.viu.auto = true; h.viu.z = U.r2(Math.max(auto.viu, Math.max(...series.map(s => s.zMax)) + rng.uniform(0.3, 0.8))); }
     if (h.viu.year == null) h.viu.year = h.post.firstYear - rng.int(20, 60);
     if (h.viu.refZ == null) h.viu.refZ = U.r2(h.viu.z - rng.uniform(0.8, 2.5));
@@ -146,6 +147,13 @@
       out.slopeCheck = U.round((out.slopeTask.zUp - out.slopeTask.zDown) / (Lkm * 1000), 6);
     }
     return out;
+  };
+  /* «Отпечаток» исходных данных рядов: если профиль, шероховатость, уклон или режим изменились
+     после генерации, ряды устарели (интерфейс предлагает перегенерировать). */
+  Hy.stamp = v => {
+    const h = v.hydro, s = JSON.stringify([v.geodesy.z, v.geodesy.iL, v.geodesy.iR, v.geodesy.stepLP, v.geodesy.stepR, v.geodesy.stepPP, Hy.mByZone(v), h.slope.i, h.unm, h.regime, h.post.nYears, h.post.firstYear, v.meta.seed]);
+    let x = 2166136261; for (let k = 0; k < s.length; k++) { x ^= s.charCodeAt(k); x = Math.imul(x, 16777619); }
+    return (x >>> 0).toString(36);
   };
   Hy.DAYS = DAYS;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

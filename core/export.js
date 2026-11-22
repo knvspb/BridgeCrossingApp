@@ -42,8 +42,14 @@
   };
   /* Таблица: head — массив заголовков, rows — массивы значений; fmts — форматы по столбцам. */
   Sheet.prototype.table = function (r, c, head, rows, fmts = [], o = {}) {
+    /* Высоты строк задаются явно: иначе программы по-разному подбирают высоту строк с переносом,
+       и рисунки, привязанные к строкам ниже таблицы, наезжают на неё. */
     head.forEach((h, j) => this.put(r, c + j, h, { bold: true, box: true, align: 'center', wrap: true, fill: 'FFF2F2F2' }));
-    rows.forEach((row, i) => row.forEach((v, j) => this.put(r + 1 + i, c + j, v, { box: true, fmt: fmts[j], align: j === (o.textCol ?? -1) ? 'left' : 'center', wrap: j === (o.textCol ?? -1) })));
+    const hr = this.ws.getRow(r); hr.height = Math.max(hr.height || 0, o.headH || (head.some(x => String(x).length > 7) ? 30 : 16));
+    rows.forEach((row, i) => {
+      row.forEach((v, j) => this.put(r + 1 + i, c + j, v, { box: true, fmt: fmts[j], align: j === (o.textCol ?? -1) ? 'left' : 'center', wrap: j === (o.textCol ?? -1) }));
+      const rw = this.ws.getRow(r + 1 + i); if (!rw.height) rw.height = 15;
+    });
     return r + 1 + rows.length;
   };
 
@@ -61,7 +67,7 @@
     /* ---------- 1. Задание ---------- */
     {
       const ws = wb.addWorksheet('Задание', { pageSetup });
-      ws.columns = [{ width: 24 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 14 }];
+      ws.columns = [{ width: 22 }, { width: 6 }, { width: 16 }, { width: 14 }, { width: 9 }, { width: 18 }, { width: 18 }];
       const s = new Sheet(ws);
       s.put(1, 2, 'Задание для выполнения курсового проекта', { size: 12, align: 'center' }); ws.mergeCells(1, 2, 1, 6);
       s.put(2, 2, '"Проект мостового перехода"', { bold: true, size: 15, align: 'center' }); ws.mergeCells(2, 2, 2, 6);
@@ -87,7 +93,7 @@
       s.r = s.table(s.r, 2, ['№', 'Элемент документации', '', 'Формат', 'Пример наименования', ''],
         [[1, 'Том курсового проекта (титульный лист с подписями, задание, пояснительная записка и чертёж)', '', '*.pdf', `${yr}_${m.group}_ИиПММ_${nm}_КП.pdf`, ''],
          [2, 'Расчетная книга', '', '*.xlsx', `${yr}_${m.group}_ИиПММ_${nm}_РК.xlsx`, '']], [], { textCol: 1 });
-      [s.r - 3, s.r - 2, s.r - 1].forEach(r => { ws.mergeCells(r, 3, r, 4); ws.mergeCells(r, 6, r, 7); ws.getRow(r).height = r === s.r - 2 ? 44 : 18; });
+      [s.r - 3, s.r - 2, s.r - 1].forEach(r => { ws.mergeCells(r, 3, r, 4); ws.mergeCells(r, 6, r, 7); ws.getRow(r).height = r === s.r - 2 ? 44 : 18; ws.getCell(r, 6).font = { name: 'Times New Roman', size: r === s.r - 3 ? 11 : 8, bold: r === s.r - 3 }; });
       s.gap();
       s.put(s.r, 1, 'Контрольные сроки выполнения курсового проекта:', { wrap: true }); ws.getRow(s.r).height = 30;
       (m.deadlines || []).forEach((d, k) => { s.put(s.r + k, 2, d || ''); ws.mergeCells(s.r + k, 2, s.r + k, 7); ws.getCell(s.r + k, 2).border = { bottom: THIN }; });
@@ -102,7 +108,7 @@
     /* ---------- 2. Исходные данные (разделы 1–3) ---------- */
     {
       const ws = wb.addWorksheet('Исходные данные', { pageSetup });
-      ws.columns = [{ width: 30 }, { width: 10 }, { width: 10 }, { width: 12 }, { width: 10 }, { width: 10 }, { width: 12 }, { width: 10 }, { width: 10 }, { width: 10 }];
+      ws.columns = [{ width: 30 }, { width: 10 }, { width: 13 }, { width: 9 }, { width: 10 }, { width: 13 }, { width: 9 }, { width: 10 }, { width: 13 }, { width: 10 }];
       const s = new Sheet(ws);
       s.put(1, 1, 'Приложение №1 к заданию на курсовое проектирование', { size: 10 }); s.put(2, 1, 'Исходные данные', { bold: true, size: 13 }); s.r = 4;
       s.title('1. Техническое задание на проектирование мостового перехода', 12);
