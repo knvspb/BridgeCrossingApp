@@ -213,6 +213,15 @@
     if (closed) p = p.concat([p[0]]);
     return { pts: p, closed };
   };
+  /* Упрощение полилинии (Дуглас — Пёккер) с допуском tol, м — для выгрузки. */
+  T.simplify = (line, tol = 0.05) => {
+    const p = line.pts; if (p.length < 4) return line;
+    const keep = new Uint8Array(p.length); keep[0] = keep[p.length - 1] = 1; const st = [[0, p.length - 1]];
+    while (st.length) { const [a, b] = st.pop(); let md = 0, mi = -1; const ax = p[a][0], ay = p[a][1], dx = p[b][0] - ax, dy = p[b][1] - ay, L2 = dx * dx + dy * dy || 1e-12;
+      for (let k = a + 1; k < b; k++) { const tt = U.clamp(((p[k][0] - ax) * dx + (p[k][1] - ay) * dy) / L2, 0, 1), ex = ax + tt * dx - p[k][0], ey = ay + tt * dy - p[k][1], d = ex * ex + ey * ey; if (d > md) { md = d; mi = k; } }
+      if (mi > 0 && md > tol * tol) { keep[mi] = 1; st.push([a, mi], [mi, b]); } }
+    return { pts: p.filter((_, k) => keep[k]), closed: line.closed };
+  };
   /* Горизонтали: [{ level, lines: [{ pts, closed }] }] — собранные и сглаженные. */
   T.contours = (res, interval, opt = {}) => {
     const zs = res.points.map(p => p[2]), lo = Math.ceil(Math.min(...zs) / interval) * interval, hi = Math.max(...zs), iters = opt.smooth ?? 3, out = [];
@@ -268,15 +277,16 @@
       w(0, 'SEQEND'); w(8, layer);
     };
     const isIdx = l => Math.abs(l / index - Math.round(l / index)) < 1e-6;
-    T.contours(res, interval, { smooth: opt.smooth ?? 3 }).forEach(c => c.lines.forEach(l => {
+    const tol = opt.tol ?? 0.05;
+    T.contours(res, interval, { smooth: opt.smooth ?? 3 }).forEach(c => c.lines.map(l => T.simplify(l, tol)).forEach(l => {
       poly3d(isIdx(c.level) ? 'HOR_UTOLSH' : 'HOR_OSN', l.pts, () => c.level, l.closed);
-      if (isIdx(c.level) && l.pts.length > 12) {                                     // подпись в середине линии
+      if (isIdx(c.level) && l.pts.length > 6) {                                     // подпись в середине линии
         const k = Math.floor(l.pts.length / 2), a = l.pts[k - 1], b = l.pts[k + 1], ang = Math.atan2(-(b[1] - a[1]), b[0] - a[0]) * 180 / Math.PI;
         w(0, 'TEXT'); w(8, 'HOR_PODPIS'); w(10, f(l.pts[k][0])); w(20, f(-l.pts[k][1])); w(30, f(c.level)); w(40, f(Math.max(2, res.L / 300)));
         w(1, String(+c.level.toFixed(2)).replace('.', ',')); w(50, f(((ang + 90) % 180) - 90)); w(72, 1); w(11, f(l.pts[k][0])); w(21, f(-l.pts[k][1])); w(31, f(c.level));
       }
     }));
-    T.waterEdge(res).forEach(l => poly3d('UREZ', l.pts, p => T.wlAt(res, p[1]), l.closed));
+    T.waterEdge(res).map(l => T.simplify(l, tol)).forEach(l => poly3d('UREZ', l.pts, p => T.wlAt(res, p[1]), l.closed));
     const road = []; for (let X = 0; X <= res.L + 1e-9; X += res.step / 2) road.push([X, 0]);
     poly3d('OS_DOROGI', road, p => T.zAt(res, p[0], 0), false);
     poly3d('OS_RUSLA', res.axis, p => T.wlAt(res, p[1]), false);
