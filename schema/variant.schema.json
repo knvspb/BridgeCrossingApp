@@ -89,10 +89,12 @@
     "geology": {
       "type": "object",
       "properties": {
+        "soilDb": { "type": "string", "description": "База неразмывающих скоростей: sudomoin — пособие, табл. 5.7–5.8 (по умолчанию); metod44 — методические указания (44 позиции); custom — своя (customDb). Если не задана, а у слоёв есть коды, принимается metod44" },
+        "customDb": { "type": ["object", "null"], "description": "Своя база: { name, entries: [{ code, cohesive, name, sub, ch1, depths: [h…], v: [vнр…] }], map: { тип описания: [коды] } }" },
         "ubv": { "type": "number", "description": "Условный низ нижнего ИГУ, м" },
         "layers": { "type": "array", "items": { "type": "object", "required": ["code"], "properties": {
           "no": { "type": "string", "description": "Номер ИГУ" },
-          "code": { "type": "integer", "minimum": 1, "maximum": 44, "description": "Расчётная категория по таблице неразмывающих скоростей (core/soils.js); нет — по описанию" },
+          "code": { "type": ["integer", "null"], "minimum": 1, "description": "Код записи выбранной базы неразмывающих скоростей (geology.soilDb); нет — по описанию" },
           "desc": { "type": "object", "description": "Описание грунта выбором из справочника (core/soilcat.js, ГОСТ 25100)", "properties": {
             "type": { "type": "string", "description": "boulder, pebble, gravel, sand-g, sand-c, sand-m, sand-f, sand-s, sandy-loam, loam-l, loam-h, clay-l, clay-h, loess, silt, peat, topsoil, marl, shale, limest, sandst, congl" },
             "variety": { "enum": ["", "sandy", "silty"] }, "filler": { "enum": ["", "sand", "sandyloam", "loam", "clay"] },

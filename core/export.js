@@ -188,7 +188,8 @@
       const s = new Sheet(ws), L = v.geology.layers;
       ws.columns = [{ width: 8 }, { width: 10 }].concat(L.map(() => ({ width: 10 })));
       s.title('4. Результаты инженерно-геологических изысканий', 12);
-      s.r = s.table(s.r, 1, ['ИГУ', 'Кат.', 'Описание грунта'], L.map(l => [l.no, l.code, BCA.SOILCAT.layerText(l)]), [], { textCol: 2 });
+      s.r = s.table(s.r, 1, ['ИГУ', 'Запись', 'Описание грунта'], L.map(l => [l.no, l.code, BCA.SOILCAT.layerText(l, BCA.soilDb(v))]), [], { textCol: 2 });
+      s.put(s.r, 1, `Неразмывающие скорости — по базе «${BCA.soilDb(v).name}».`, { italic: true }); s.r++;
       for (let k = 1; k <= L.length; k++) ws.mergeCells(s.r - k, 3, s.r - k, Math.max(8, 2 + L.length));
       ws.mergeCells(s.r - L.length - 1, 3, s.r - L.length - 1, Math.max(8, 2 + L.length));
       s.gap();

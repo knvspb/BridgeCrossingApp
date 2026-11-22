@@ -3,9 +3,8 @@
    ВНИМАНИЕ: наименования и границы приведены по классификации ГОСТ 25100 (ред. 2011/2020) без сверки
    с текстом стандарта в этой версии программы — сверить (docs/SOILS.md).
 
-   Каждое описание связано с расчётной категорией таблицы неразмывающих скоростей (soils.js, коды 1…44):
-   codes — допустимые категории для этого типа грунта, первая — по умолчанию.
-   Для глинистых и лёссовых грунтов категория выбирается по коэффициенту пористости e. */
+   Связь описания с записью базы неразмывающих скоростей задаёт сама база (soildb.js, db.map):
+   первая запись — по умолчанию; для глинистых и лёссовых грунтов запись выбирается по коэффициенту пористости e. */
 (function (root) {
   'use strict';
   const BCA = root.BCA || (root.BCA = {});
@@ -24,28 +23,28 @@
 
   /* Типы грунтов. g — род (0 — м, 1 — ж) для согласования прилагательных. */
   S.TYPES = [
-    { id: 'boulder', group: 'coarse', name: 'Валунный грунт', note: 'частиц крупнее 200 мм более 50 % (при неокатанных — глыбовый)', g: 0, codes: [33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43] },
-    { id: 'pebble',  group: 'coarse', name: 'Галечниковый грунт', note: 'крупнее 10 мм более 50 % (при неокатанных — щебенистый)', g: 0, codes: [28, 27, 29, 30, 31, 32] },
-    { id: 'gravel',  group: 'coarse', name: 'Гравийный грунт', note: 'крупнее 2 мм более 50 % (при неокатанных — дресвяный)', g: 0, codes: [22, 23, 24, 25, 26] },
-    { id: 'sand-g',  group: 'sand', name: 'Песок гравелистый', note: 'крупнее 2 мм более 25 %', g: 0, codes: [20] },
-    { id: 'sand-c',  group: 'sand', name: 'Песок крупный', note: 'крупнее 0,5 мм более 50 %', g: 0, codes: [19, 18] },
-    { id: 'sand-m',  group: 'sand', name: 'Песок средней крупности', note: 'крупнее 0,25 мм более 50 %', g: 0, codes: [16, 18, 21] },
-    { id: 'sand-f',  group: 'sand', name: 'Песок мелкий', note: 'крупнее 0,1 мм 75 % и более', g: 0, codes: [14, 15, 17] },
-    { id: 'sand-s',  group: 'sand', name: 'Песок пылеватый', note: 'крупнее 0,1 мм менее 75 %', g: 0, codes: [13, 12] },
-    { id: 'sandy-loam', group: 'clay', name: 'Супесь', note: 'число пластичности 1–7', g: 1, codes: [5, 6, 7, 8], consist: 'supes' },
-    { id: 'loam-l',  group: 'clay', name: 'Суглинок лёгкий', note: 'число пластичности 7–12', g: 0, codes: [5, 6, 7, 8] },
-    { id: 'loam-h',  group: 'clay', name: 'Суглинок тяжёлый', note: 'число пластичности 12–17', g: 0, codes: [1, 2, 3, 4] },
-    { id: 'clay-l',  group: 'clay', name: 'Глина лёгкая', note: 'число пластичности 17–27', g: 1, codes: [1, 2, 3, 4] },
-    { id: 'clay-h',  group: 'clay', name: 'Глина тяжёлая', note: 'число пластичности более 27', g: 1, codes: [1, 2, 3, 4] },
-    { id: 'loess',   group: 'special', name: 'Лёссовый грунт (суглинок)', note: 'просадочный', g: 0, codes: [9, 10, 11] },
-    { id: 'silt',    group: 'special', name: 'Ил', note: 'современный осадок водоёмов', g: 0, codes: [12] },
-    { id: 'peat',    group: 'special', name: 'Торф', note: 'органический грунт', g: 0, codes: [13] },
-    { id: 'topsoil', group: 'special', name: 'Почвенно-растительный слой', note: '', g: 0, codes: [13] },
-    { id: 'marl',    group: 'rock', name: 'Мергель', note: '', g: 0, codes: [44] },
-    { id: 'shale',   group: 'rock', name: 'Сланец', note: '', g: 0, codes: [44] },
-    { id: 'limest',  group: 'rock', name: 'Известняк', note: '', g: 0, codes: [44] },
-    { id: 'sandst',  group: 'rock', name: 'Песчаник', note: '', g: 0, codes: [44] },
-    { id: 'congl',   group: 'rock', name: 'Конгломерат', note: '', g: 0, codes: [44] }
+    { id: 'boulder', group: 'coarse', name: 'Валунный грунт', note: 'частиц крупнее 200 мм более 50 % (при неокатанных — глыбовый)', g: 0 },
+    { id: 'pebble',  group: 'coarse', name: 'Галечниковый грунт', note: 'крупнее 10 мм более 50 % (при неокатанных — щебенистый)', g: 0 },
+    { id: 'gravel',  group: 'coarse', name: 'Гравийный грунт', note: 'крупнее 2 мм более 50 % (при неокатанных — дресвяный)', g: 0 },
+    { id: 'sand-g',  group: 'sand', name: 'Песок гравелистый', note: 'крупнее 2 мм более 25 %', g: 0 },
+    { id: 'sand-c',  group: 'sand', name: 'Песок крупный', note: 'крупнее 0,5 мм более 50 %', g: 0 },
+    { id: 'sand-m',  group: 'sand', name: 'Песок средней крупности', note: 'крупнее 0,25 мм более 50 %', g: 0 },
+    { id: 'sand-f',  group: 'sand', name: 'Песок мелкий', note: 'крупнее 0,1 мм 75 % и более', g: 0 },
+    { id: 'sand-s',  group: 'sand', name: 'Песок пылеватый', note: 'крупнее 0,1 мм менее 75 %', g: 0 },
+    { id: 'sandy-loam', group: 'clay', name: 'Супесь', note: 'число пластичности 1–7', g: 1, consist: 'supes' },
+    { id: 'loam-l',  group: 'clay', name: 'Суглинок лёгкий', note: 'число пластичности 7–12', g: 0 },
+    { id: 'loam-h',  group: 'clay', name: 'Суглинок тяжёлый', note: 'число пластичности 12–17', g: 0 },
+    { id: 'clay-l',  group: 'clay', name: 'Глина лёгкая', note: 'число пластичности 17–27', g: 1 },
+    { id: 'clay-h',  group: 'clay', name: 'Глина тяжёлая', note: 'число пластичности более 27', g: 1 },
+    { id: 'loess',   group: 'special', name: 'Лёссовый грунт (суглинок)', note: 'просадочный', g: 0 },
+    { id: 'silt',    group: 'special', name: 'Ил', note: 'современный осадок водоёмов', g: 0 },
+    { id: 'peat',    group: 'special', name: 'Торф', note: 'органический грунт', g: 0 },
+    { id: 'topsoil', group: 'special', name: 'Почвенно-растительный слой', note: '', g: 0 },
+    { id: 'marl',    group: 'rock', name: 'Мергель', note: '', g: 0 },
+    { id: 'shale',   group: 'rock', name: 'Сланец', note: '', g: 0 },
+    { id: 'limest',  group: 'rock', name: 'Известняк', note: '', g: 0 },
+    { id: 'sandst',  group: 'rock', name: 'Песчаник', note: '', g: 0 },
+    { id: 'congl',   group: 'rock', name: 'Конгломерат', note: '', g: 0 }
   ];
 
   /* Характеристики: варианты [id, подпись (м), подпись (ж)]. */
@@ -82,26 +81,26 @@
     return [name].concat(parts).join(', ');
   };
 
-  /* Расчётная категория (код таблицы vнр) по описанию. Для глинистых и лёссовых — по e. */
-  const E_ORDER = { e4: 0, e3: 1, e2: 2, e1: 3 };
-  S.autoCode = d => {
+  /* Расчётная запись базы по описанию. Для глинистых и лёссовых — по коэффициенту пористости e. */
+  const E_IDX = { e4: 0, e3: 1, e2: 2, e1: 3 };
+  S.autoCode = (d, db) => {
+    db = db || BCA.SOIL_DBS[BCA.SOIL_DB_DEFAULT];
     const t = d && S.type(d.type); if (!t) return null;
-    if ((t.group === 'clay') && d.e) return t.codes[E_ORDER[d.e]] ?? t.codes[0];
-    if (t.id === 'loess' && d.e) return t.codes[Math.max(0, E_ORDER[d.e] - 1)] ?? t.codes[0];
-    return t.codes[0];
+    const codes = BCA.soilCodesFor(db, t.id); if (!codes.length) return null;
+    if (d.e && (db.eOrdered || []).includes(t.id)) { const k = E_IDX[d.e] - (t.id === 'loess' ? 1 : 0); if (k >= 0 && k < codes.length) return codes[k]; }
+    return codes[0];
   };
-  /* Подобрать описание к коду (для данных без описания). */
-  S.fromCode = code => {
-    const t = S.TYPES.find(q => q.codes.includes(code)) || S.TYPES[0];
-    const d = { type: t.id };
-    if (t.group === 'clay') d.e = ['e4', 'e3', 'e2', 'e1'][t.codes.indexOf(code)] || '';
-    if (t.id === 'loess') d.e = ['e3', 'e2', 'e1'][t.codes.indexOf(code)] || '';
+  /* Описание по записи базы (для данных без описания). */
+  S.fromCode = (code, db) => {
+    db = db || BCA.SOIL_DBS[BCA.SOIL_DB_DEFAULT];
+    const t = S.TYPES.find(q => BCA.soilCodesFor(db, q.id).includes(code)) || S.TYPES.find(q => q.id === 'sand-m');
+    const d = { type: t.id }, k = BCA.soilCodesFor(db, t.id).indexOf(code);
+    if ((db.eOrdered || []).includes(t.id) && k >= 0) d.e = ['e4', 'e3', 'e2', 'e1'][k + (t.id === 'loess' ? 1 : 0)] || '';
     return d;
   };
-  /* Описание слоя для бланка; если описания нет — наименование категории таблицы vнр. */
-  S.layerText = l => {
+  /* Описание слоя для бланка; если описания нет — наименование записи базы. */
+  S.layerText = (l, db) => {
     if (l.desc && l.desc.type) return S.describe(l.desc);
-    const s = (BCA.SOILS || []).find(q => q.code === l.code);
-    return s ? [s.name, s.sub, s.ch1, s.ch2].filter(Boolean).join(', ') : '?';
+    return BCA.soilEntryText(BCA.soilEntry(db || BCA.SOIL_DBS[BCA.SOIL_DB_DEFAULT], l.code));
   };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

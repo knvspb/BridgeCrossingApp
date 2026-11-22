@@ -153,18 +153,40 @@ test('книга данных Excel: выгрузка и загрузка без
   assert.equal(r.v.hydro.viu.z, v.hydro.viu.z); assert.equal(r.v.tz.roadCategory, v.tz.roadCategory);
 });
 
-test('справочник грунтов: описание и расчётная категория', () => {
-  const SC = B.SOILCAT;
+test('справочник грунтов: описание и запись базы', () => {
+  const SC = B.SOILCAT, S = B.SOIL_DBS.sudomoin, M = B.SOIL_DBS.metod44;
   assert.equal(SC.describe({ type: 'loam-h', variety: 'silty', il: 'stiff', e: 'e3' }), 'Суглинок тяжёлый пылеватый, тугопластичный, e = 0,9–0,6');
-  assert.equal(SC.describe({ type: 'clay-l', il: 'soft' }), 'Глина лёгкая, мягкопластичная');
   assert.equal(SC.describe({ type: 'pebble', filler: 'sand', sr: 'sat' }), 'Галечниковый грунт с песчаным заполнителем, насыщенный водой');
-  assert.equal(SC.autoCode({ type: 'clay-h', e: 'e2' }), 3);              // плотные (Кп 0,6–0,3)
-  assert.equal(SC.autoCode({ type: 'loess', e: 'e1' }), 11);
-  assert.equal(SC.autoCode({ type: 'sand-m' }), 16);
-  SC.TYPES.forEach(t => t.codes.forEach(c => assert.ok(B.SOILS.find(s => s.code === c), `${t.id}: нет кода ${c}`)));
-  for (let c = 1; c <= 44; c++) assert.ok(SC.TYPES.some(t => t.codes.includes(c)), `код ${c} не покрыт справочником`);
-  const il = SC.propOptions('il', SC.type('sandy-loam')).map(o => o[0]);
-  assert.deepEqual(il, ['', 'solid', 'plastic', 'fluid']);                // консистенция супеси — три класса
+  assert.equal(SC.autoCode({ type: 'clay-h', e: 'e2' }, S), 3);            // пособие, табл. 5.7: плотные
+  assert.equal(SC.autoCode({ type: 'loess', e: 'e1' }, S), 11);
+  assert.equal(SC.autoCode({ type: 'sand-m' }, S), 14);
+  assert.equal(SC.autoCode({ type: 'sand-m' }, M), 16);
+  assert.equal(SC.autoCode({ type: 'limest' }, S), null);                  // скальных грунтов в пособии нет
+  for (const db of [S, M]) {
+    Object.values(db.map).flat().forEach(c => assert.ok(B.soilEntry(db, c), `${db.id}: нет записи ${c}`));
+    db.entries.forEach(e => assert.ok(SC.TYPES.some(t => B.soilCodesFor(db, t.id).includes(e.code)), `${db.id}: запись ${e.code} не связана с описаниями`));
+  }
+  assert.deepEqual(SC.propOptions('il', SC.type('sandy-loam')).map(o => o[0]), ['', 'solid', 'plastic', 'fluid']);
+});
+
+test('база пособия: значения табл. 5.7–5.8 и интерполяция по глубине', () => {
+  const S = B.SOIL_DBS.sudomoin;
+  assert.equal(S.entries.length, 27);
+  assert.deepEqual(B.soilEntry(S, 4).v, [1.40, 1.70, 1.90, 2.10]);          // глины очень плотные
+  assert.deepEqual(B.soilEntry(S, 15).v, [0.6, 0.7, 0.8, 0.9, 1.0, 1.2]);   // песок крупный
+  assert.equal(B.soilV(B.soilEntry(S, 2), 1.5), 0.925);                     // между 1,0 и 2,0 м
+  assert.equal(B.soilV(B.soilEntry(S, 2), 8), 1.10);                        // «3,0 и более»
+  assert.equal(B.soilV(B.soilEntry(S, 26), 0.3), 4.7);                      // нет значения при 0,4 м
+});
+
+test('смена базы: записи слоёв подбираются по описаниям; старые файлы — база 44 позиций', () => {
+  const v = B.schema.defaultVariant(1);
+  assert.equal(v.geology.soilDb, 'sudomoin');
+  assert.deepEqual(v.geology.layers.map(l => l.code), [2, 15, 13, 16, 4]);
+  B.schema.setSoilDb(v, 'metod44');
+  assert.deepEqual(v.geology.layers.map(l => l.code), [2, 19, 14, 22, 4]);
+  const old = JSON.parse(JSON.stringify(v)); delete old.geology.soilDb;
+  assert.equal(B.schema.migrate(old).geology.soilDb, 'metod44');
 });
 
 test('топоповерхность: естественный рельеф добавляет формы, но не трогает ось', () => {
@@ -174,4 +196,14 @@ test('топоповерхность: естественный рельеф до
   let diff = 0; a.points.forEach((p, k) => { diff = Math.max(diff, Math.abs(p[2] - b.points[k][2])); });
   assert.ok(diff > 1);
   const c = B.topo.contours(a, 0.5); assert.ok(c.length > 10 && c.every(q => q.segs.length > 0));
+});
+
+test('своя база грунтов: выгрузка в Excel и загрузка обратно', async t => {
+  let ExcelJS; try { ExcelJS = require('exceljs'); } catch (e) { return t.skip('нет пакета exceljs'); }
+  const S = B.SOIL_DBS.sudomoin, buf = await B.dataio.buildSoilDbWorkbook(ExcelJS, S).xlsx.writeBuffer();
+  const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf);
+  const c = B.dataio.parseSoilDbWorkbook(wb, 'копия');
+  assert.equal(c.entries.length, 27); assert.deepEqual(c.entries[3].v, S.entries[3].v); assert.deepEqual(c.map['sand-m'], [14]);
+  const v = B.schema.defaultVariant(1); v.geology.customDb = c; B.schema.setSoilDb(v, 'custom');
+  assert.deepEqual(v.geology.layers.map(l => l.code), [2, 15, 13, 16, 4]);
 });

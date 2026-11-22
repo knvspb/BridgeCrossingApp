@@ -73,7 +73,7 @@
     const draw = () => {
       view = C.profile(svg, V, { mode });
       legend.innerHTML = '';
-      V.geology.layers.forEach((l, k) => legend.appendChild(h('span', {}, h('i', { style: `background:${C.LAYER_COLORS[k % C.LAYER_COLORS.length]}` }), `ИГУ ${l.no}: ${B.SOILCAT.layerText(l)}`)));
+      V.geology.layers.forEach((l, k) => legend.appendChild(h('span', {}, h('i', { style: `background:${C.LAYER_COLORS[k % C.LAYER_COLORS.length]}` }), `ИГУ ${l.no}: ${B.SOILCAT.layerText(l, B.soilDb(V))}`)));
     };
     const bar = !modes.length ? null : h('div', { class: 'row' }, modes.map(([label, kind, layer]) => h('button', { class: mode.kind === kind && (kind === 'ground' || mode.layer === layer) ? 'on' : '', title: 'Зажмите кнопку мыши и ведите по разрезу', onclick: () => { mode = { kind, layer }; renderTab(); } }, label)));
     let drag = null;
@@ -135,25 +135,38 @@
 
   /* ---------- 4. Грунты ---------- */
   function renderSoil() {
-    const box = pane('soil'), geo = V.geology, L = geo.layers, N = V.geodesy.z.length, SC = B.SOILCAT;
+    const box = pane('soil'), geo = V.geology, L = geo.layers, N = V.geodesy.z.length, SC = B.SOILCAT, db = B.soilDb(V);
     if (!(mode.kind !== 'ground' && L[mode.layer])) mode = L.length ? { kind: 'top', layer: 0 } : { kind: 'ground', layer: 0 };
     /* тип грунта: список с группами (несвязные, связные, особые, скальные) */
     const typeSel = l => {
       const s = h('select', { title: 'Тип грунта по классификации ГОСТ 25100' });
       Object.entries(SC.GROUPS).forEach(([gk, gq]) => s.appendChild(h('optgroup', { label: gq.name }, SC.TYPES.filter(t => t.group === gk).map(t => h('option', { value: t.id, selected: l.desc?.type === t.id, title: t.note }, t.name)))));
-      s.onchange = () => change(() => { const keep = l.desc?.extra; l.desc = { type: s.value }; if (keep) l.desc.extra = keep; l.code = SC.autoCode(l.desc); });
+      s.onchange = () => change(() => { const keep = l.desc?.extra; l.desc = { type: s.value }; if (keep) l.desc.extra = keep; l.code = SC.autoCode(l.desc, db) ?? l.code; });
       return s;
     };
     const propSel = (l, p, t) => { const s = h('select', { title: SC.PROPS[p].name });
       SC.propOptions(p, t).forEach(([v, w]) => s.appendChild(h('option', { value: v, selected: (l.desc[p] || '') === v }, v ? (Array.isArray(w) ? w[t.g] : w) : SC.PROPS[p].name + ': —')));
-      s.onchange = () => change(() => { l.desc[p] = s.value; if (p === 'e') l.code = SC.autoCode(l.desc); }); return s; };
-    const codeSel = (l, t) => { const s = h('select', { title: 'Расчётная категория по таблице неразмывающих скоростей' });
-      (t ? t.codes : B.SOILS.map(q => q.code)).forEach(c => { const q = B.SOILS.find(z => z.code === c); s.appendChild(h('option', { value: c, selected: c === l.code }, `${c}. ${q.sub || q.name}${q.ch1 ? ' (' + q.ch1 + ')' : ''}`)); });
+      s.onchange = () => change(() => { l.desc[p] = s.value; if (p === 'e') l.code = SC.autoCode(l.desc, db) ?? l.code; }); return s; };
+    const codeSel = (l, t) => { const s = h('select', { title: 'Запись базы неразмывающих скоростей' }), cs = t ? B.soilCodesFor(db, t.id) : [];
+      (cs.length ? cs : db.entries.map(e => e.code)).forEach(c => { const q = B.soilEntry(db, c); if (q) s.appendChild(h('option', { value: c, selected: c === l.code }, `${c}. ${q.name}${q.sub ? ' — ' + q.sub : ''}${q.ch1 ? ' (' + q.ch1 + ')' : ''}`)); });
       s.onchange = () => change(() => l.code = Number(s.value)); return s; };
+    /* база грунтов: встроенные + своя (из Excel) */
+    const dbSel = h('select', { title: 'База неразмывающих скоростей' });
+    Object.values(B.SOIL_DBS).forEach(d => dbSel.appendChild(h('option', { value: d.id, selected: db.id === d.id }, d.name + (d.priority ? ' (основная)' : ''))));
+    if (geo.customDb) dbSel.appendChild(h('option', { value: 'custom', selected: db.id === 'custom' }, 'Своя: ' + geo.customDb.name));
+    dbSel.onchange = () => change(() => B.schema.setSoilDb(V, dbSel.value));
+    const dbFile = h('input', { type: 'file', accept: '.xlsx', class: 'hide' });
+    dbFile.onchange = async () => { const fl = dbFile.files[0]; if (!fl) return;
+      try { const wb = new window.ExcelJS.Workbook(); await wb.xlsx.load(await fl.arrayBuffer()); const cdb = B.dataio.parseSoilDbWorkbook(wb, fl.name.replace(/\.xlsx$/i, ''));
+        change(() => { geo.customDb = cdb; B.schema.setSoilDb(V, 'custom'); }); toast(`База загружена: ${cdb.entries.length} записей`); } catch (e) { toast('Ошибка: ' + e.message); } dbFile.value = ''; };
+    const dbBar = h('div', {}, h('div', { class: 'row' }, h('b', {}, 'База грунтов:'), dbSel, dbFile,
+        btn('Своя из Excel…', () => dbFile.click(), null, 'Лист «База грунтов»: код, наименование, типы описаний, vнр по глубинам'),
+        btn('Скачать базу', async () => download(`База грунтов — ${db.name}.xlsx`, await xlsxBlob(B.dataio.buildSoilDbWorkbook(window.ExcelJS, db))), null, 'Выгрузить выбранную базу в Excel (шаблон для своей)')),
+      h('p', { class: 'note' }, db.source || ''));
     const blocks = L.map((l, k) => {
-      if (!l.desc || !l.desc.type) l.desc = SC.fromCode(l.code);
-      const t = SC.type(l.desc.type), q = B.SOILS.find(z => z.code === l.code);
-      const ok = t && t.codes.includes(l.code);
+      if (!l.desc || !l.desc.type) l.desc = SC.fromCode(l.code, db);
+      const t = SC.type(l.desc.type), q = B.soilEntry(db, l.code), cs = t ? B.soilCodesFor(db, t.id) : [];
+      const ok = !cs.length || cs.includes(l.code);
       const head = h('div', { class: 'row' },
         h('span', { class: 'sw', style: `background:${C.LAYER_COLORS[k % C.LAYER_COLORS.length]}` }), h('b', {}, 'ИГУ'), h('span', { style: 'width:52px;display:inline-block' }, txt(() => l.no, x => l.no = x)),
         typeSel(l), h('span', { class: 'sp' }),
@@ -161,20 +174,20 @@
       head.querySelectorAll('button')[0].disabled = k === 0; head.querySelectorAll('button')[1].disabled = k === L.length - 1;
       const props = h('div', { class: 'row' }, t ? SC.GROUPS[t.group].props.map(p => propSel(l, p, t)) : null,
         h('input', { type: 'text', value: l.desc.extra || '', placeholder: 'дополнение: включения, прослои…', style: 'flex:1;min-width:160px', onchange: e => change(() => { l.desc.extra = e.target.value.trim(); }) }));
-      const calc = h('div', { class: 'row' }, h('span', { class: 'note' }, 'vнр:'), codeSel(l, t), q ? h('span', { class: 'note', title: 'vнр при h = 0,4 / 1 / 2 / 3 / 5 / 10 м' }, q.v.map(z => U.fmt(z, 2)).join(' / ') + ' м/с') : null,
-        ok ? null : h('span', { class: 'pill unv' }, 'не по описанию'));
+      const calc = h('div', { class: 'row' }, h('span', { class: 'note' }, 'vнр:'), codeSel(l, t), q ? h('span', { class: 'note', title: 'Средняя глубина потока h, м → vнр, м/с' }, q.depths.map((d, k) => `${U.fmt(d, 1)}${k === q.depths.length - 1 ? '+' : ''}: ${q.v[k] == null ? '—' : U.fmt(q.v[k], 2)}`).join(' · ')) : h('span', { class: 'pill unv' }, 'нет в базе'),
+        ok ? null : h('span', { class: 'pill unv' }, 'не по описанию'), t && !cs.length ? h('span', { class: 'pill unv', title: 'Тип грунта отсутствует в выбранной базе' }, 'тип вне базы') : null);
       const gen = h('div', { class: 'row note' }, 'Генератор: залегание', num(() => l.gen.order ?? k + 1, x => l.gen.order = x ?? k + 1, { step: 1, w: 48, title: '1 — верхний' }),
         'мощн.', num(() => l.gen.t, x => l.gen.t = x ?? 0, { step: 0.5, w: 58 }), 'м ± ', num(() => l.gen.var, x => l.gen.var = U.clamp(x ?? 0, 0, 1.5), { step: 0.1, w: 52 }),
         chk(() => l.gen.lens, x => l.gen.lens = x, 'линза', 'Слой только между створами'), num(() => l.gen.from, x => l.gen.from = U.clamp(x ?? 1, 1, N), { step: 1, w: 52 }), '–', num(() => Math.min(l.gen.to, N), x => l.gen.to = U.clamp(x ?? N, 1, N), { step: 1, w: 52 }));
-      return h('div', { class: 'layer' }, head, props, h('div', { class: 'desc' }, SC.layerText(l)), calc, gen);
+      return h('div', { class: 'layer' }, head, props, h('div', { class: 'desc' }, SC.layerText(l, db)), calc, gen);
     });
     const modes = L.map((l, k) => ['Кровля ' + l.no, 'top', k]);
     if (L.length) modes.push(['Ластик ' + L[mode.layer].no, 'erase', mode.layer]);
     const tr = []; for (let i = 0; i < N; i++) tr.push(h('tr', { class: 'z-' + P.zoneKey(V.geodesy, i) }, h('td', {}, i + 1), h('td', { class: 'num' }, U.fmt(V.geodesy.z[i])),
       L.map(l => h('td', {}, num(() => l.tops[i], x => { l.tops[i] = x == null || x === 0 ? null : U.r2(Math.min(x, V.geodesy.z[i])); }, { w: 76 })))));
     box.append(h('div', { class: 'grid-half' },
-      step(4, 'Грунты: описание по справочнику и границы слоёв', blocks,
-        h('div', { class: 'row' }, btn('+ ИГУ', () => change(() => L.push({ no: String(L.length + 1), code: 16, desc: { type: 'sand-m' }, tops: new Array(N).fill(null), gen: { t: 3, var: 0.3, lens: false, from: 1, to: N, order: Math.max(0, ...L.map(l => l.gen.order || 0)) + 1 } }))),
+      step(4, 'Грунты: описание по справочнику и границы слоёв', dbBar, blocks,
+        h('div', { class: 'row' }, btn('+ ИГУ', () => change(() => L.push({ no: String(L.length + 1), code: SC.autoCode({ type: 'sand-m' }, db) ?? db.entries[0].code, desc: { type: 'sand-m' }, tops: new Array(N).fill(null), gen: { t: 3, var: 0.3, lens: false, from: 1, to: N, order: Math.max(0, ...L.map(l => l.gen.order || 0)) + 1 } }))),
           btn('Сгенерировать границы', () => change(() => P.generateSoil(V)), 'primary')),
         kv([['Условный низ', num(() => geo.ubv, x => geo.ubv = x, { step: 0.5 }), 'м'], ['Плавность слоёв', num(() => geo.corr, x => geo.corr = U.clamp(x ?? 10, 2, 40), { step: 1, title: 'Створов на «волну» кровли' })],
           ['Зерно', h('span', { class: 'pair' }, num(() => geo.seed, x => geo.seed = x | 0, { step: 1, w: 90 }), btn('🎲', () => change(() => { geo.seed = B.newSeed(); P.generateSoil(V); })))]])),
@@ -293,6 +306,9 @@
     build();
   }
 
+  const toISO = s => { const q = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(s || ''); return q ? `${q[3]}-${q[2]}-${q[1]}` : ''; };
+  const fromISO = s => { const q = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || ''); return q ? `${q[3]}.${q[2]}.${q[1]}` : ''; };
+
   /* ================= Выдача ================= */
   const exportOpts = { key: true, daily: true };
   function renderOut() {
@@ -374,7 +390,7 @@
       <h4>Метеорологические сведения</h4><table class="noborder"><tr><td>Расчетная скорость ветра, м/с</td><td>${f(hy.wind.v)}</td></tr><tr><td>Длина разгона ветровой волны, км</td><td>${f(hy.wind.fetch)}</td></tr></table><div class="foot">Страница 3 из 4</div></div>`;
     const L = V.geology.layers;
     const p4 = `<div class="sheet"><h2>4. Результаты инженерно-геологических изысканий</h2>
-      ${T(['ИГУ', 'Описание грунта'], L.map(l => [l.no, B.SOILCAT.layerText(l)]))}
+      ${T(['ИГУ', 'Описание грунта'], L.map(l => [l.no, B.SOILCAT.layerText(l, B.soilDb(V))]))}
       <p><b>Инженерно-геологический разрез по оси перехода</b></p>${svgG.outerHTML}<div class="foot">Страница 4 из 4</div></div>`;
     return p1 + p2 + p3 + p4;
   }

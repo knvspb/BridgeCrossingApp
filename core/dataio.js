@@ -35,7 +35,7 @@
     ['hydro.regime.Cv', 'Cv годовых максимумов расхода', '', 'n'], ['hydro.regime.CsCv', 'Cs/Cv', '', 'n'], ['hydro.regime.navMean', 'Средняя длительность навигации', 'сут', 'n'], ['hydro.regime.navSd', 'Разброс длительности навигации', 'сут', 'n'],
     ['hydro.rsuT', 't для таблицы РСУ', 'сут, через запятую', 'l'], ['hydro.rsuConsecutive', 't суток подряд', 'да/нет', 'b'],
     ['hydro.wind.v', 'Расчётная скорость ветра', 'м/с', 'n'], ['hydro.wind.fetch', 'Длина разгона волны', 'км', 'n'],
-    ['geology.ubv', 'Условный низ нижнего ИГУ', 'м', 'n'], ['topo.radius', 'Радиус кривизны реки в плане (+ влево)', 'м', 'n'], ['topo.gridStep', 'Шаг сетки топоповерхности', 'м', 'n']
+    ['geology.soilDb', 'База грунтов: sudomoin (пособие), metod44 (методические указания), custom', '', 's'], ['geology.ubv', 'Условный низ нижнего ИГУ', 'м', 'n'], ['topo.radius', 'Радиус кривизны реки в плане (+ влево)', 'м', 'n'], ['topo.gridStep', 'Шаг сетки топоповерхности', 'м', 'n']
   ];
   /* Пустое значение этих параметров означает «вычислить/сгенерировать»; для остальных — «по умолчанию». */
   D.NULLABLE = ['hydro.post.zero', 'hydro.viu.z', 'hydro.viu.year', 'hydro.viu.refZ', 'hydro.regime.zLo', 'hydro.regime.zHi', 'hydro.slope.Lkm'];
@@ -80,10 +80,10 @@
     sheet(S.years, ['Год', 'Превышение П, м', 'Навигация, сут'].concat(h.rsuT.map(t => 't=' + t)),
       ann.map((a, j) => [a.year, a.P, rsu[j]?.navDays ?? ''].concat(h.rsuT.map(t => rsu[j]?.values[t] ?? ''))), [8, 14, 14]);
     const DK = D.DESC_KEYS;
-    sheet(S.layers, ['№ ИГУ', 'Код категории vнр', 'Описание (справочно)', 'Залегание (1 — верхний)', 'Мощность, м', 'Изменчивость', 'Линза: от створа', 'Линза: до створа'].concat(DK.map(k => 'desc.' + k)),
-      v.geology.layers.map((l, k) => [l.no, l.code, BCA.SOILCAT.layerText(l), l.gen.order ?? k + 1, l.gen.t, l.gen.var, l.gen.lens ? l.gen.from : '', l.gen.lens ? l.gen.to : ''].concat(DK.map(q => l.desc?.[q] ?? ''))), [8, 10, 50, 12, 12, 12, 12, 12]);
+    sheet(S.layers, ['№ ИГУ', 'Запись базы vнр (код)', 'Описание (справочно)', 'Залегание (1 — верхний)', 'Мощность, м', 'Изменчивость', 'Линза: от створа', 'Линза: до створа'].concat(DK.map(k => 'desc.' + k)),
+      v.geology.layers.map((l, k) => [l.no, l.code, BCA.SOILCAT.layerText(l, BCA.soilDb(v)), l.gen.order ?? k + 1, l.gen.t, l.gen.var, l.gen.lens ? l.gen.from : '', l.gen.lens ? l.gen.to : ''].concat(DK.map(q => l.desc?.[q] ?? ''))), [8, 10, 50, 12, 12, 12, 12, 12]);
     sheet(S.soilref, ['Поле', 'Значение', 'Наименование'], [].concat(
-      BCA.SOILCAT.TYPES.map(t => ['desc.type', t.id, `${t.name} (${BCA.SOILCAT.GROUPS[t.group].name}); категории vнр: ${t.codes.join(', ')}`]),
+      BCA.SOILCAT.TYPES.map(t => ['desc.type', t.id, `${t.name} (${BCA.SOILCAT.GROUPS[t.group].name}); записи базы «${BCA.soilDb(v).name}»: ${BCA.soilCodesFor(BCA.soilDb(v), t.id).join(', ') || '—'}`]),
       ...Object.entries(BCA.SOILCAT.PROPS).map(([p, q]) => q.opts.filter(o => o[0]).map(o => ['desc.' + p, o[0], Array.isArray(o[1]) ? o[1][0] : o[1]]))), [14, 14, 80]);
     sheet(S.tops, ['Створ'].concat(v.geology.layers.map(l => 'ИГУ ' + l.no)), g.z.map((_, i) => [i + 1].concat(v.geology.layers.map(l => l.tops[i] ?? ''))), [8]);
     return wb;
@@ -116,9 +116,45 @@
     return D.fromPartial(partial, notes);
   };
 
+  /* ---------- база грунтов в Excel (выгрузка любой базы как шаблона и загрузка своей) ---------- */
+  D.SOILDB_SHEET = 'База грунтов';
+  D.buildSoilDbWorkbook = (ExcelJS, db) => {
+    const wb = new ExcelJS.Workbook(), ws = wb.addWorksheet(D.SOILDB_SHEET);
+    const depths = [...new Set(db.entries.flatMap(e => e.depths))].sort((a, b) => a - b);
+    const typesOf = code => Object.entries(db.map || {}).filter(([, cs]) => cs.includes(code)).map(([k]) => k).join(', ');
+    ws.addRow(['Код', 'Связный', 'Наименование', 'Разновидность', 'Характеристика', 'Типы описаний (soilcat)'].concat(depths.map(d => 'h=' + d)));
+    ws.getRow(1).font = { bold: true };
+    db.entries.forEach(e => ws.addRow([e.code, e.cohesive ? 'да' : 'нет', e.name, e.sub || '', [e.ch1, e.ch2].filter(Boolean).join(', '), typesOf(e.code)].concat(depths.map(d => { const k = e.depths.indexOf(d); return k >= 0 ? e.v[k] : null; }))));
+    ws.columns.forEach((c, k) => { c.width = [7, 9, 28, 40, 22, 30][k] ?? 8; });
+    const info = wb.addWorksheet('Описание');
+    [['База грунтов: ' + db.name], ['Источник: ' + (db.source || '')], [''],
+     ['Строка — запись базы: код (целое, уникальное), связный (да/нет), наименование, разновидность, характеристика,'],
+     ['типы описаний — через запятую идентификаторы справочника описаний (лист «Справочник грунтов» книги данных); по ним запись подбирается автоматически;'],
+     ['столбцы h=… — неразмывающая средняя скорость, м/с, при средней глубине потока h, м (пустая ячейка — нет значения). Последняя глубина — «и более».']].forEach(r => info.addRow(r));
+    info.getColumn(1).width = 140;
+    return wb;
+  };
+  D.parseSoilDbWorkbook = (wb, name) => {
+    const ws = wb.getWorksheet(D.SOILDB_SHEET) || wb.worksheets[0]; if (!ws) throw new Error('В файле нет листов');
+    const head = []; ws.getRow(1).eachCell((c, k) => { head[k - 1] = String(cellVal(c) ?? ''); });
+    const dcols = head.map((h, k) => [k, /^h\s*=\s*([\d.,]+)/i.exec(h)]).filter(q => q[1]).map(q => [q[0], U.num(q[1][1])]);
+    if (!dcols.length) throw new Error('Нет столбцов глубин «h=…»');
+    const entries = [], map = {};
+    sheetRows(ws).forEach(r => {
+      const code = U.num(r[0]); if (code == null) return;
+      const ds = [], vs = []; dcols.forEach(([k, d]) => { const val = U.num(r[k]); if (val != null) { ds.push(d); vs.push(val); } });
+      entries.push({ code: Math.round(code), cohesive: /^(да|yes|1|true|\+)/i.test(String(r[1] ?? '')), name: String(r[2] ?? ''), sub: String(r[3] ?? ''), ch1: String(r[4] ?? ''), depths: ds, depthsLast: 'и более', v: vs });
+      String(r[5] ?? '').split(/[;,\s]+/).filter(Boolean).forEach(tid => { (map[tid] = map[tid] || []).push(Math.round(code)); });
+    });
+    if (!entries.length) throw new Error('В базе нет записей');
+    if (new Set(entries.map(e => e.code)).size !== entries.length) throw new Error('Коды записей повторяются');
+    return { id: 'custom', name: name || 'Своя база', source: 'загружена из Excel', entries, map, eOrdered: ['clay-h', 'clay-l', 'loam-h', 'loam-l', 'loess'] };
+  };
+
   /* Неполный вариант → полный. Отсутствующее берётся по умолчанию или генерируется. */
   D.fromPartial = (o, notes = []) => {
     const seed = o.meta?.seed ?? 1, v = BCA.schema.defaultVariant(seed);
+    if (o.geology && o.geology.layers && !o.geology.soilDb) BCA.schema.fixSoilDb(o);
     const merge = (dst, src) => { for (const k in src) { const s = src[k];
       if (s === undefined) continue;
       if (s && typeof s === 'object' && !Array.isArray(s) && dst[k] && typeof dst[k] === 'object' && !Array.isArray(dst[k])) merge(dst[k], s);
@@ -131,7 +167,8 @@
     const N = BCA.profile.idx(v.geodesy).N;
     if (!hasZ) { if (zonesGiven || v.geodesy.z.length !== N) { v.geodesy.z = new Array(N).fill(0); BCA.profile.generate(v); notes.push('профиль'); } }
     else if (v.geodesy.z.length !== N) throw new Error(`Профиль: ${v.geodesy.z.length} отметок, а по зонам нужно ${N}`);
-    v.geology.layers.forEach(l => { if (!l.desc || !l.desc.type) l.desc = BCA.SOILCAT.fromCode(l.code ?? 2); if (l.code == null) { l.code = BCA.SOILCAT.autoCode(l.desc); notes.push('категории грунтов'); } });
+    const sdb = BCA.soilDb(v);
+    v.geology.layers.forEach(l => { if (!l.desc || !l.desc.type) l.desc = BCA.SOILCAT.fromCode(l.code ?? 2, sdb); if (l.code == null) { l.code = BCA.SOILCAT.autoCode(l.desc, sdb); notes.push('записи vнр грунтов'); } });
     v.geology.layers.forEach((l, k) => { l.gen = Object.assign({ order: k + 1, t: 3, var: 0.3, lens: false, from: 1, to: 999 }, l.gen || {}); if (!Array.isArray(l.tops) || l.tops.length !== N) l.tops = new Array(N).fill(null); });
     if (!hasTops) { BCA.profile.generateSoil(v); notes.push('грунты'); }
     if (zonesGiven && !o.tz?.road) v.tz.road = [];                                     // точки по умолчанию не подходят к другим зонам

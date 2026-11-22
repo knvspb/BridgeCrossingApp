@@ -18,9 +18,9 @@
 
   S.defaultLayers = () => [
     { no: '1', code: 2,  desc: { type: 'loam-h', variety: 'silty', il: 'stiff', e: 'e3' }, tops: [], gen: { order: 1, t: 2.5, var: 0.4, lens: false, from: 1, to: 999 } },
-    { no: '2', code: 19, desc: { type: 'sand-c', density: 'medium', sr: 'sat' }, tops: [], gen: { order: 2, t: 3.0, var: 0.4, lens: false, from: 1, to: 999 } },
-    { no: '3', code: 14, desc: { type: 'sand-f', density: 'loose', sr: 'sat' }, tops: [], gen: { order: 3, t: 2.0, var: 0.3, lens: true, from: 8, to: 30 } },
-    { no: '4', code: 23, desc: { type: 'gravel', filler: 'sand', sr: 'sat' }, tops: [], gen: { order: 4, t: 3.0, var: 0.3, lens: false, from: 1, to: 999 } },
+    { no: '2', code: 15, desc: { type: 'sand-c', density: 'medium', sr: 'sat' }, tops: [], gen: { order: 2, t: 3.0, var: 0.4, lens: false, from: 1, to: 999 } },
+    { no: '3', code: 13, desc: { type: 'sand-f', density: 'loose', sr: 'sat' }, tops: [], gen: { order: 3, t: 2.0, var: 0.3, lens: true, from: 8, to: 30 } },
+    { no: '4', code: 16, desc: { type: 'gravel', filler: 'sand', sr: 'sat' }, tops: [], gen: { order: 4, t: 3.0, var: 0.3, lens: false, from: 1, to: 999 } },
     { no: '5', code: 4,  desc: { type: 'clay-l', il: 'semisolid', e: 'e1' }, tops: [], gen: { order: 5, t: 4.0, var: 0.3, lens: false, from: 1, to: 999 } }
   ];
 
@@ -61,7 +61,7 @@
         wind: { v: 10, fetch: 2 },
         series: []
       },
-      geology: { ubv: 105, corr: 10, seed: seed + 7, layers: S.defaultLayers() },
+      geology: { soilDb: BCA.SOIL_DB_DEFAULT, customDb: null, ubv: 105, corr: 10, seed: seed + 7, layers: S.defaultLayers() },
       topo: { radius: 0, gridStep: 10, size: null, amp: 0.3, seed: seed + 13 },
       gen: { profile: { seed, zOutL: 131, zFootL: 129, shapeBL: 1, zBrowL: 123, shapeL: 1.6, noiseL: 0.6, oxL: 2.5, oxPosL: 0.6,
         zThal: 117.9, thalPos: 0.6, shapeC: 1.6, noiseC: 0.3, zBrowR: 123, shapeR: 1.4, noiseR: 0.6, oxR: 1.5, oxPosR: 0.2, zFootR: 129, zOutR: 131, shapeBR: 1, precision: 1 } },
@@ -83,7 +83,8 @@
     if (!Array.isArray(o.geodesy.z) || o.geodesy.z.length !== N) throw new Error(`geodesy.z: ожидается ${N} отметок (сумма интервалов зон + 1), получено ${o.geodesy.z?.length ?? 0}`);
     const d = S.defaultVariant(o.meta?.seed ?? 1);
     const fill = (dst, src) => { for (const k in src) { if (dst[k] === undefined) dst[k] = src[k]; else if (src[k] && typeof src[k] === 'object' && !Array.isArray(src[k]) && dst[k] && typeof dst[k] === 'object' && !Array.isArray(dst[k])) fill(dst[k], src[k]); } };
-    if (o.geology && Array.isArray(o.geology.layers)) o.geology.layers.forEach(l => { if (!l.desc || !l.desc.type) l.desc = BCA.SOILCAT.fromCode(l.code); });
+    S.fixSoilDb(o);
+    if (o.geology && Array.isArray(o.geology.layers)) o.geology.layers.forEach(l => { if (!l.desc || !l.desc.type) l.desc = BCA.SOILCAT.fromCode(l.code, BCA.soilDb(o)); });
     if (o.geology && Array.isArray(o.geology.layers)) o.geology.layers.forEach((l, k) => { l.gen = Object.assign({ order: k + 1, t: 3, var: 0.3, lens: false, from: 1, to: N }, l.gen || {}); if (!Array.isArray(l.tops) || l.tops.length !== N) l.tops = new Array(N).fill(null); });
     fill(o, d);
     return o;
@@ -102,6 +103,18 @@
     if (v.hydro.viu.refZ == null && v.hydro.viu.z != null) { v.hydro.viu.refZ = U.r2(v.hydro.viu.z - 1.5); done.push('отметка объекта для ВИУ'); }
     if (!(v.tz.road || []).length) { v.tz.road = S.autoRoad(v); done.push('отметки дороги'); }
     return done;
+  };
+
+  /* База грунтов: файлы без geology.soilDb, но с кодами слоёв, относятся к базе методических указаний (44 позиции). */
+  S.fixSoilDb = o => {
+    if (!o.geology) return;
+    if (!o.geology.soilDb) o.geology.soilDb = (o.geology.layers || []).some(l => l.code != null) ? 'metod44' : BCA.SOIL_DB_DEFAULT;
+    if (o.geology.soilDb === 'custom' && !o.geology.customDb) o.geology.soilDb = BCA.SOIL_DB_DEFAULT;
+  };
+  /* Смена базы грунтов: записи слоёв подбираются заново по описаниям. */
+  S.setSoilDb = (v, id) => {
+    v.geology.soilDb = id; const db = BCA.soilDb(v);
+    v.geology.layers.forEach(l => { const c = BCA.SOILCAT.autoCode(l.desc, db); if (c != null) l.code = c; else if (!BCA.soilEntry(db, l.code)) l.code = db.entries[0]?.code ?? null; });
   };
 
   /* Отметки оси дороги по умолчанию: внешний край и подошва каждого берега, на 2 м выше наивысшей точки берегов. */
@@ -155,10 +168,12 @@
     ['LP', 'R', 'PP'].forEach(k => { const r = v.library.roughness.find(q => q.id === h.morph[k].id); if (r && !r.verified) push('warn', 'Гидрология', `m для «${r.text.slice(0, 50)}…» не сверен.`); });
     const geo = v.geology;
     if (!geo.layers.length) push('err', 'Геология', 'Не задано ни одного ИГУ.');
-    geo.layers.forEach(l => { const t = l.desc && BCA.SOILCAT.type(l.desc.type);
+    const db = BCA.soilDb(v);
+    geo.layers.forEach(l => { const t = l.desc && BCA.SOILCAT.type(l.desc.type), codes = t ? BCA.soilCodesFor(db, t.id) : [];
       if (!t) push('warn', 'Геология', `ИГУ ${l.no}: нет описания грунта по справочнику.`);
-      else if (!t.codes.includes(l.code)) push('warn', 'Геология', `ИГУ ${l.no}: расчётная категория ${l.code} не соответствует описанию «${t.name}».`);
-      if (!BCA.SOILS.find(s => s.code === l.code)) push('err', 'Геология', `ИГУ ${l.no}: нет грунта с кодом ${l.code}.`); if (l.tops.every(t => t == null)) push('warn', 'Геология', `ИГУ ${l.no} не встречается.`); });
+      else if (!codes.length) push('warn', 'Геология', `ИГУ ${l.no}: «${t.name}» нет в базе «${db.name}» — запись vнр выбрана вручную.`);
+      else if (!codes.includes(l.code)) push('warn', 'Геология', `ИГУ ${l.no}: запись vнр ${l.code} не соответствует описанию «${t.name}».`);
+      if (!BCA.soilEntry(db, l.code)) push('err', 'Геология', `ИГУ ${l.no}: в базе «${db.name}» нет записи ${l.code}.`); if (l.tops.every(t => t == null)) push('warn', 'Геология', `ИГУ ${l.no} не встречается.`); });
     let bad = 0; for (let i = 0; i < N; i++) { const tops = geo.layers.map(l => l.tops[i]).filter(t => t != null); if (!tops.length || Math.abs(Math.max(...tops) - g.z[i]) > 0.05) bad++; }
     if (bad) push('warn', 'Геология', `На ${bad} створах кровля верхнего слоя не совпадает с поверхностью.`);
     if (geo.layers.some(l => l.tops.some(t => t != null && t <= geo.ubv))) push('err', 'Геология', `Есть кровли ниже условного низа ${geo.ubv} м.`);
